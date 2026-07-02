@@ -160,7 +160,7 @@ CREATE TABLE IF NOT EXISTS pages (
 -- content columns IS DISTINCT FROM (allow-list widened per D6 + codex #3
 -- to include title/type/page_kind/corpus_generation/content_hash) so
 -- read-time mutations don't invalidate every cache row.
-CREATE OR REPLACE FUNCTION bump_page_generation_fn() RETURNS trigger SET search_path = pg_catalog, public AS $func$
+CREATE OR REPLACE FUNCTION bump_page_generation_fn() RETURNS trigger SET search_path FROM CURRENT AS $func$
 BEGIN
   IF (TG_OP = 'INSERT') THEN
     NEW.generation := COALESCE((SELECT MAX(generation) FROM pages), 0) + 1;
@@ -240,7 +240,7 @@ SELECT setval('page_generation_clock_seq', GREATEST(
   COALESCE((SELECT MAX(generation) FROM pages), 0)
 ));
 
-CREATE OR REPLACE FUNCTION bump_page_generation_clock_fn() RETURNS trigger SET search_path = pg_catalog, public AS $func$
+CREATE OR REPLACE FUNCTION bump_page_generation_clock_fn() RETURNS trigger SET search_path FROM CURRENT AS $func$
 BEGIN
   PERFORM nextval('page_generation_clock_seq');
   RETURN NULL;
@@ -356,7 +356,7 @@ CREATE INDEX IF NOT EXISTS content_chunks_stale_idx
 -- NL queries ("how do we handle errors") rank doc-comment hits above body text.
 -- BEFORE INSERT OR UPDATE OF specific columns — only refires when those change,
 -- not on every chunk update (e.g., embedding refresh doesn't trigger rebuild).
-CREATE OR REPLACE FUNCTION update_chunk_search_vector() RETURNS TRIGGER SET search_path = pg_catalog, public AS $fn$
+CREATE OR REPLACE FUNCTION update_chunk_search_vector() RETURNS TRIGGER SET search_path FROM CURRENT AS $fn$
 BEGIN
   NEW.search_vector :=
     setweight(to_tsvector('english', COALESCE(NEW.doc_comment, '')), 'A') ||
@@ -815,7 +815,7 @@ ALTER TABLE pages ADD COLUMN IF NOT EXISTS search_vector tsvector;
 CREATE INDEX IF NOT EXISTS idx_pages_search ON pages USING GIN(search_vector);
 
 -- Function to rebuild search_vector for a page
-CREATE OR REPLACE FUNCTION update_page_search_vector() RETURNS trigger SET search_path = pg_catalog, public AS $$
+CREATE OR REPLACE FUNCTION update_page_search_vector() RETURNS trigger SET search_path FROM CURRENT AS $$
 DECLARE
   timeline_text TEXT;
 BEGIN
@@ -1354,7 +1354,7 @@ CREATE INDEX IF NOT EXISTS think_ab_results_recent_idx
   ON think_ab_results (source_id, ran_at DESC);
 
 -- NOTIFY trigger for real-time job events (Postgres only, not PGLite)
-CREATE OR REPLACE FUNCTION notify_minion_job_change() RETURNS trigger SET search_path = pg_catalog, public AS $$
+CREATE OR REPLACE FUNCTION notify_minion_job_change() RETURNS trigger SET search_path FROM CURRENT AS $$
 BEGIN
   PERFORM pg_notify('minion_jobs', json_build_object(
     'id', NEW.id, 'status', NEW.status, 'name', NEW.name,

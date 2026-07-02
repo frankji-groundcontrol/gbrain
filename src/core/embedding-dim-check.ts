@@ -95,7 +95,7 @@ export async function readContentChunksEmbeddingDim(engine: BrainEngine): Promis
   const existsRows = await engine.executeRaw<{ exists: boolean }>(
     `SELECT EXISTS (
        SELECT 1 FROM information_schema.columns
-       WHERE table_schema = 'public'
+       WHERE table_schema = current_schema()
          AND table_name = 'content_chunks'
          AND column_name = 'embedding'
      ) AS exists`,
@@ -110,7 +110,7 @@ export async function readContentChunksEmbeddingDim(engine: BrainEngine): Promis
        FROM pg_attribute a
        JOIN pg_class c ON c.oid = a.attrelid
        JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'public'
+      WHERE n.nspname = current_schema()
         AND c.relname = 'content_chunks'
         AND a.attname = 'embedding'
         AND NOT a.attisdropped`,
@@ -510,7 +510,7 @@ export async function readFactsEmbeddingDim(engine: BrainEngine): Promise<FactsC
   const existsRows = await engine.executeRaw<{ exists: boolean }>(
     `SELECT EXISTS (
        SELECT 1 FROM information_schema.columns
-       WHERE table_schema = 'public'
+       WHERE table_schema = current_schema()
          AND table_name = 'facts'
          AND column_name = 'embedding'
      ) AS exists`,
@@ -523,7 +523,7 @@ export async function readFactsEmbeddingDim(engine: BrainEngine): Promise<FactsC
        FROM pg_attribute a
        JOIN pg_class c ON c.oid = a.attrelid
        JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'public'
+      WHERE n.nspname = current_schema()
         AND c.relname = 'facts'
         AND a.attname = 'embedding'
         AND NOT a.attisdropped`,

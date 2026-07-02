@@ -77,6 +77,8 @@ Agent operating protocols (the GBrain Skillpack family, indexed by
   [executive-assistant](guides/executive-assistant.md),
   [cron-schedule](guides/cron-schedule.md).
 - Operations & deployment: [live-sync](guides/live-sync.md),
+  [custom-schema-deployment](guides/custom-schema-deployment.md) (run the
+  brain in a dedicated Postgres schema; Supabase search_path + IPv6 notes),
   [multi-source-brains](guides/multi-source-brains.md),
   [minions-deployment](guides/minions-deployment.md),
   [minions-shell-jobs](guides/minions-shell-jobs.md),
@@ -123,6 +125,7 @@ scopes, admin dashboard); per-client recipes:
   self-installing recipes, credential gateway, meeting webhooks, pre-commit
   frontmatter gate, embedding-provider registry.
 - [ai-providers/zeroentropy.md](ai-providers/zeroentropy.md),
+  [ai-providers/dashscope.md](ai-providers/dashscope.md),
   [ai-providers/llama-server-reranker.md](ai-providers/llama-server-reranker.md)
   — provider-specific embedding/reranker setup.
 - [embedding-migrations.md](embedding-migrations.md) — switching embedding

@@ -8,7 +8,7 @@
  */
 
 import { createEngine } from '../core/engine-factory.ts';
-import { loadConfig, saveConfig, toEngineConfig, gbrainPath, effectiveEnvDatabaseUrl, type GBrainConfig } from '../core/config.ts';
+import { loadConfig, loadConfigFileOnly, saveConfig, toEngineConfig, gbrainPath, effectiveEnvDatabaseUrl, type GBrainConfig } from '../core/config.ts';
 import type { BrainEngine } from '../core/engine.ts';
 import type { EngineConfig } from '../core/types.ts';
 import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'fs';
@@ -93,6 +93,11 @@ export async function runMigrateEngine(sourceEngine: BrainEngine, args: string[]
   if (opts.targetEngine === 'postgres') {
     // #427 guard: don't let a cwd-.env DATABASE_URL become a migration target.
     targetConfig.database_url = opts.targetUrl || effectiveEnvDatabaseUrl();
+    // Same IPv6-hostile-network seam as init.ts: the target engine is
+    // constructed from a bare URL, so thread the direct-URL override or
+    // initSchema's derived direct host can hang.
+    targetConfig.direct_database_url =
+      process.env.GBRAIN_DIRECT_DATABASE_URL ?? loadConfigFileOnly()?.direct_database_url;
     if (!targetConfig.database_url) {
       console.error('Target is Supabase but no connection string provided. Use: --url <connection_string>');
       process.exit(1);

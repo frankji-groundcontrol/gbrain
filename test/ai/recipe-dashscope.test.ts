@@ -1,5 +1,6 @@
 /**
  * DashScope (Alibaba) recipe smoke (Commit 6 of the v0.32 wave).
+ * text-embedding-v4 support added 2026-07 (China-region user wave).
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -20,14 +21,17 @@ describe('recipe: dashscope', () => {
     expect(r!.auth_env?.required).toEqual(['DASHSCOPE_API_KEY']);
   });
 
-  test('embedding touchpoint declares text-embedding-v3 first + 1024 dims', () => {
+  test('embedding touchpoint declares text-embedding-v4 first + 1024 default dims', () => {
     const r = getRecipe('dashscope')!;
     expect(r.touchpoints.embedding).toBeDefined();
-    expect(r.touchpoints.embedding!.models[0]).toBe('text-embedding-v3');
+    expect(r.touchpoints.embedding!.models[0]).toBe('text-embedding-v4');
+    expect(r.touchpoints.embedding!.models).toContain('text-embedding-v3');
     expect(r.touchpoints.embedding!.models).toContain('text-embedding-v2');
     expect(r.touchpoints.embedding!.default_dims).toBe(1024);
-    expect(r.touchpoints.embedding!.dims_options).toEqual([64, 128, 256, 512, 768, 1024]);
-    // Matryoshka: every dims option ≤ 2000 (HNSW-compatible).
+    expect(r.touchpoints.embedding!.dims_options).toEqual([64, 128, 256, 512, 768, 1024, 1536]);
+    // Matryoshka: every dims option ≤ 2000 (HNSW-compatible). v4 supports
+    // 2048 upstream but that exceeds pgvector's HNSW cap, so it is
+    // deliberately not offered.
     for (const d of r.touchpoints.embedding!.dims_options ?? []) {
       expect(d).toBeLessThanOrEqual(2000);
     }
@@ -55,6 +59,11 @@ describe('recipe: dashscope', () => {
     expect(r.touchpoints.embedding!.chars_per_token).toBeGreaterThan(0);
   });
 
+  test('declares max_batch_items=10 (v4 caps requests at 10 texts)', () => {
+    const r = getRecipe('dashscope')!;
+    expect(r.touchpoints.embedding!.max_batch_items).toBe(10);
+  });
+
   test('dimsProviderOptions threads dimensions for text-embedding-v3 (Matryoshka)', async () => {
     // Codex finding #1: DashScope text-embedding-v3 is Matryoshka 64-1024.
     // Without `dimensions` on the wire, user-selected non-default dims are
@@ -67,5 +76,35 @@ describe('recipe: dashscope', () => {
     // text-embedding-v2 is fixed-dim; no passthrough.
     expect(dimsProviderOptions('openai-compatible', 'text-embedding-v2', 1024))
       .toBeUndefined();
+  });
+
+  test('dimsProviderOptions threads dimensions for text-embedding-v4 (Matryoshka 64-2048)', async () => {
+    const { dimsProviderOptions } = await import('../../src/core/ai/dims.ts');
+    expect(dimsProviderOptions('openai-compatible', 'text-embedding-v4', 1536))
+      .toEqual({ openaiCompatible: { dimensions: 1536 } });
+    expect(dimsProviderOptions('openai-compatible', 'text-embedding-v4', 1024))
+      .toEqual({ openaiCompatible: { dimensions: 1024 } });
+    expect(dimsProviderOptions('openai-compatible', 'text-embedding-v4', 64))
+      .toEqual({ openaiCompatible: { dimensions: 64 } });
+  });
+
+  test('dimsProviderOptions rejects off-list dims for text-embedding-v4', async () => {
+    // v4 accepts a DISCRETE dims list (unlike OpenAI's 1..max range); an
+    // off-list width would otherwise fail only AFTER the paid API call via
+    // the returned-length check.
+    const { dimsProviderOptions } = await import('../../src/core/ai/dims.ts');
+    expect(() => dimsProviderOptions('openai-compatible', 'text-embedding-v4', 1000))
+      .toThrow(AIConfigError);
+    expect(() => dimsProviderOptions('openai-compatible', 'text-embedding-v4', 3000))
+      .toThrow(AIConfigError);
+  });
+
+  test('dimsProviderOptions rejects >1024 dims for text-embedding-v3', async () => {
+    // dims_options is touchpoint-wide, so 1536 (valid for v4) passes init
+    // preflight even when the model is v3 — the per-model guard has to
+    // catch it before the wire call.
+    const { dimsProviderOptions } = await import('../../src/core/ai/dims.ts');
+    expect(() => dimsProviderOptions('openai-compatible', 'text-embedding-v3', 1536))
+      .toThrow(AIConfigError);
   });
 });

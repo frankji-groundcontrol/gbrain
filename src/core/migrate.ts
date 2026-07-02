@@ -893,11 +893,11 @@ export const MIGRATIONS: Migration[] = [
         -- went away, the bare ALTER would fail with 42P01 and abort v24.
         -- information_schema.tables lookup makes the statement self-healing.
         IF EXISTS (SELECT 1 FROM information_schema.tables
-                    WHERE table_schema = 'public' AND table_name = 'budget_ledger') THEN
+                    WHERE table_schema = current_schema() AND table_name = 'budget_ledger') THEN
           ALTER TABLE budget_ledger ENABLE ROW LEVEL SECURITY;
         END IF;
         IF EXISTS (SELECT 1 FROM information_schema.tables
-                    WHERE table_schema = 'public' AND table_name = 'budget_reservations') THEN
+                    WHERE table_schema = current_schema() AND table_name = 'budget_reservations') THEN
           ALTER TABLE budget_reservations ENABLE ROW LEVEL SECURITY;
         END IF;
 

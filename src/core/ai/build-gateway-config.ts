@@ -34,6 +34,10 @@ export function buildGatewayConfig(c: GBrainConfig): AIGatewayConfig {
   // plane field now exists (GBrainConfig type) and gets mapped here, so
   // setting it via `~/.gbrain/config.json` propagates into the gateway.
   if (c.zeroentropy_api_key) envFromConfig.ZEROENTROPY_API_KEY = c.zeroentropy_api_key;
+  // DashScope: same seam as ZE above. Region/workspace-scoped keys + China
+  // users mean env-only resolution loses the key in daemon-spawned gbrain
+  // processes; the file-plane slot travels with ~/.gbrain/config.json.
+  if (c.dashscope_api_key) envFromConfig.DASHSCOPE_API_KEY = c.dashscope_api_key;
 
   // v0.32 codex finding #4+#5 fix: thread local-server _BASE_URL env vars
   // into base_urls so the gateway hits the user's configured port. Without
@@ -52,6 +56,11 @@ export function buildGatewayConfig(c: GBrainConfig): AIGatewayConfig {
   if (process.env.LMSTUDIO_BASE_URL) envBaseUrls['lmstudio'] = process.env.LMSTUDIO_BASE_URL;
   if (process.env.LITELLM_BASE_URL) envBaseUrls['litellm'] = process.env.LITELLM_BASE_URL;
   if (process.env.OPENROUTER_BASE_URL) envBaseUrls['openrouter'] = process.env.OPENROUTER_BASE_URL;
+  // DashScope API keys are region-scoped (China/Beijing vs international);
+  // the recipe default is the intl endpoint, so China-region users need an
+  // override. File-plane provider_base_urls.dashscope also works; this env
+  // var gives parity with the other overridable providers above.
+  if (process.env.DASHSCOPE_BASE_URL) envBaseUrls['dashscope'] = process.env.DASHSCOPE_BASE_URL;
 
   return {
     embedding_model: c.embedding_model,

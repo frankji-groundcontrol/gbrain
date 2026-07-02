@@ -5242,17 +5242,18 @@ export async function buildChecks(
       const sql = db.getConnection();
       // Left-join pg_description so we get the (optional) COMMENT ON TABLE
       // value alongside rowsecurity in a single round-trip. Filter to
-      // base tables in the public schema.
+      // base tables in the brain's schema (current_schema() — public by
+      // default, or the custom schema when the connection URL pins one).
       const tables = await sql`
         SELECT
           t.tablename,
           t.rowsecurity,
           COALESCE(
-            obj_description(format('public.%I', t.tablename)::regclass, 'pg_class'),
+            obj_description(format('%I.%I', t.schemaname, t.tablename)::regclass, 'pg_class'),
             ''
           ) AS comment
         FROM pg_tables t
-        WHERE t.schemaname = 'public'
+        WHERE t.schemaname = current_schema()
       `;
       const EXEMPT_RE = /^GBRAIN:RLS_EXEMPT\s+reason=\S.{3,}/;
       const exempt: string[] = [];
@@ -5609,7 +5610,7 @@ export async function buildChecks(
            FROM pg_attribute a
            JOIN pg_class c ON c.oid = a.attrelid
            JOIN pg_namespace n ON n.oid = c.relnamespace
-          WHERE n.nspname = 'public'
+          WHERE n.nspname = current_schema()
             AND c.relname = 'content_chunks'
             AND a.attname = ANY($1::text[])
             AND NOT a.attisdropped`,
@@ -5627,7 +5628,7 @@ export async function buildChecks(
         const indexRows = await engine.executeRaw<{ indexdef: string }>(
           `SELECT indexdef FROM pg_indexes
             WHERE tablename = 'content_chunks'
-              AND schemaname = 'public'`,
+              AND schemaname = current_schema()`,
         );
         for (const col of declaredColumns) {
           const found = indexRows.some(r => /USING\s+hnsw/i.test(r.indexdef) && r.indexdef.includes(`(${col} `));
@@ -7096,7 +7097,7 @@ export async function buildChecks(
           SELECT schemaname, relname AS table, indexrelname AS index,
                  idx_scan, pg_size_pretty(pg_relation_size(indexrelid)) AS size
             FROM pg_stat_user_indexes
-           WHERE schemaname = 'public'
+           WHERE schemaname = current_schema()
              AND idx_scan = 0
            ORDER BY pg_relation_size(indexrelid) DESC
            LIMIT 20

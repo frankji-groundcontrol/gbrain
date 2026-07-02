@@ -90,6 +90,20 @@ export function isValidOpenAITextEmbedding3Dim(modelId: string, dims: number): b
   return Number.isInteger(dims) && dims >= 1 && dims <= max;
 }
 
+// DashScope text-embedding-v4 accepts `dimensions` on the OpenAI-compat
+// path from a discrete Matryoshka list (not an arbitrary 1..max range like
+// OpenAI). text-embedding-v3 uses the same mechanism but caps at 1024 —
+// values above that pass the touchpoint-wide dims_options preflight (which
+// now includes 1536 for v4) yet get rejected by the provider, so both
+// models are range-checked here where the model id is known.
+// Ref: https://help.aliyun.com/zh/model-studio/embedding (verified 2026-07).
+export const DASHSCOPE_V4_VALID_DIMS = [2048, 1536, 1024, 768, 512, 256, 128, 64] as const;
+const DASHSCOPE_V3_MAX_DIMS = 1024;
+
+export function isValidDashScopeV4Dim(dims: number): boolean {
+  return (DASHSCOPE_V4_VALID_DIMS as readonly number[]).includes(dims);
+}
+
 /**
  * Build the providerOptions blob for embedMany() that pins output dimensions.
  *
@@ -212,11 +226,35 @@ export function dimsProviderOptions(
         }
         return { openaiCompatible: { dimensions: dims } };
       }
+      // DashScope text-embedding-v4 (Matryoshka 64-2048, discrete list)
+      // accepts `dimensions` on the OpenAI-compat path. Without it the
+      // provider returns its server default (1024) and any other configured
+      // width fails the returned-length check AFTER the paid API call —
+      // validate here instead so misconfiguration fails with a fix hint.
+      if (modelId === 'text-embedding-v4') {
+        if (!isValidDashScopeV4Dim(dims)) {
+          throw new AIConfigError(
+            `DashScope "${modelId}" supports embedding_dimensions of ` +
+            `${[...DASHSCOPE_V4_VALID_DIMS].reverse().join('/')}, got ${dims}.`,
+            'Set `embedding_dimensions` to one of the supported values (1024 is the provider default).',
+          );
+        }
+        return { openaiCompatible: { dimensions: dims } };
+      }
       // DashScope text-embedding-v3 (Matryoshka 64-1024) and Zhipu
       // embedding-3 (Matryoshka 256-2048) both accept `dimensions` on the
       // OpenAI-compat path. Without this, user-selected non-default dims are
       // silently ignored and the provider returns its default size.
-      // Symmetric retrieval — inputType ignored.
+      // Symmetric retrieval — inputType ignored. v3 is additionally capped
+      // at 1024: the dashscope touchpoint's dims_options now carries 1536
+      // for v4, so a v3 brain could pass init preflight at a width the
+      // provider will reject.
+      if (modelId === 'text-embedding-v3' && dims > DASHSCOPE_V3_MAX_DIMS) {
+        throw new AIConfigError(
+          `DashScope "${modelId}" supports embedding_dimensions in 64..${DASHSCOPE_V3_MAX_DIMS}, got ${dims}.`,
+          'Set `embedding_dimensions` to 1024 or below, or switch to dashscope:text-embedding-v4 for 1536.',
+        );
+      }
       if (modelId === 'text-embedding-v3' || modelId === 'embedding-3') {
         return { openaiCompatible: { dimensions: dims } };
       }

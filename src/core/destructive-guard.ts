@@ -94,7 +94,7 @@ export async function assessDestructiveImpact(
   const filesTableRows = await engine.executeRaw<{ exists: boolean }>(
     `SELECT EXISTS (
        SELECT 1 FROM information_schema.tables
-       WHERE table_schema = 'public' AND table_name = 'files'
+       WHERE table_schema = current_schema() AND table_name = 'files'
      ) AS exists`,
   );
   if (filesTableRows[0]?.exists) {

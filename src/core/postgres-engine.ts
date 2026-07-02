@@ -204,6 +204,7 @@ export class PostgresEngine implements BrainEngine {
       // manager so kill-switch state and direct pool are shared.
       this.connectionManager = new ConnectionManager({
         url,
+        directUrl: config.direct_database_url ?? null,
         parent: config.parentConnectionManager,
         readPoolOwnedExternally: true, // we own _sql; manager just routes
       });
@@ -221,6 +222,7 @@ export class PostgresEngine implements BrainEngine {
       if (url) {
         this.connectionManager = new ConnectionManager({
           url,
+          directUrl: config.direct_database_url ?? null,
           parent: config.parentConnectionManager,
           readPoolOwnedExternally: true, // db.ts owns the pool
         });
@@ -3708,7 +3710,7 @@ export class PostgresEngine implements BrainEngine {
           FROM pg_attribute a
           JOIN pg_class c ON c.oid = a.attrelid
           JOIN pg_namespace n ON n.oid = c.relnamespace
-         WHERE n.nspname = 'public'
+         WHERE n.nspname = current_schema()
            AND c.relname = 'facts'
            AND a.attname = 'embedding'
            AND NOT a.attisdropped
