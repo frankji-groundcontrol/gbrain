@@ -1400,9 +1400,25 @@ export async function embed(texts: string[], opts?: EmbedOpts): Promise<Float32A
 
   // Pre-split is gated on max_batch_tokens. Recipes without it (e.g. OpenAI)
   // ride the fast path: one embedMany call, no recursion safety net.
-  const batches = maxBatchTokens
+  let batches = maxBatchTokens
     ? splitByTokenBudget(truncated, Math.floor(maxBatchTokens * effectiveSafetyFactor(recipe)), charsPerToken)
     : [truncated];
+
+  // Item-count cap (max_batch_items, e.g. DashScope v4's 10 texts/request):
+  // token budgeting alone lets many small chunks pile into one request, which
+  // count-capped providers reject outright. Split those runs up-front instead
+  // of paying failed calls to the recursive-halving safety net.
+  const maxBatchItems = embedding?.max_batch_items;
+  if (maxBatchTokens && maxBatchItems && maxBatchItems > 0) {
+    batches = batches.flatMap((batch) => {
+      if (batch.length <= maxBatchItems) return [batch];
+      const runs: string[][] = [];
+      for (let i = 0; i < batch.length; i += maxBatchItems) {
+        runs.push(batch.slice(i, i + maxBatchItems));
+      }
+      return runs;
+    });
+  }
 
   const allEmbeddings: Float32Array[] = [];
   let _embedThrew = false;

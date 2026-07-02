@@ -414,3 +414,73 @@ describe('startup warning for recipes missing max_batch_tokens', () => {
     expect(warnings.find(w => w.includes('"google"'))).toBeDefined();
   });
 });
+
+// --------- 8. max_batch_items item-count cap (DashScope v4: 10 texts/request) ---------
+
+describe('embed() max_batch_items cap via stubbed transport', () => {
+  beforeEach(() => resetGateway());
+  afterEach(() => __setEmbedTransportForTests(null));
+
+  function configureDashscope(): void {
+    configureGateway({
+      embedding_model: 'dashscope:text-embedding-v4',
+      embedding_dimensions: 1024,
+      env: { DASHSCOPE_API_KEY: 'sk-fake' },
+    });
+  }
+
+  test('splits token-budgeted batches into runs of at most max_batch_items', async () => {
+    configureDashscope();
+
+    const stub = mock(async ({ values }: { values: string[] }) =>
+      fakeEmbeddings(values, 1024),
+    );
+    __setEmbedTransportForTests(stub as any);
+
+    // 25 tiny texts fit in ONE token budget (8192 × 0.8 × 2 chars) but
+    // exceed DashScope v4's 10-texts-per-request cap; expect 10+10+5.
+    const texts = Array.from({ length: 25 }, (_, i) => `t${i}`);
+    const result = await embed(texts);
+
+    expect(result).toHaveLength(25);
+    const callLengths = stub.mock.calls.map(
+      ([arg]) => (arg as { values: string[] }).values.length,
+    );
+    expect(Math.max(...callLengths)).toBeLessThanOrEqual(10);
+    expect(callLengths.reduce((a, b) => a + b, 0)).toBe(25);
+  });
+
+  test('order preserved across item-cap boundaries', async () => {
+    configureDashscope();
+
+    const stub = mock(async ({ values }: { values: string[] }) =>
+      fakeEmbeddings(values, 1024),
+    );
+    __setEmbedTransportForTests(stub as any);
+
+    const texts = Array.from({ length: 12 }, (_, i) => `text-${i}`);
+    const result = await embed(texts);
+    expect(result).toHaveLength(12);
+    // fakeEmbeddings derives values from the input string, so order
+    // mismatches would surface as wrong vectors here.
+    const flat = stub.mock.calls.flatMap(
+      ([arg]) => (arg as { values: string[] }).values,
+    );
+    expect(flat).toEqual(texts);
+  });
+
+  test('recipes without max_batch_items are unaffected (voyage packs full budget)', async () => {
+    configureVoyage();
+
+    const stub = mock(async ({ values }: { values: string[] }) =>
+      fakeEmbeddings(values, 1024),
+    );
+    __setEmbedTransportForTests(stub as any);
+
+    const texts = Array.from({ length: 25 }, (_, i) => `t${i}`);
+    const result = await embed(texts);
+    expect(result).toHaveLength(25);
+    // No item cap declared → single call for 25 tiny texts.
+    expect(stub).toHaveBeenCalledTimes(1);
+  });
+});

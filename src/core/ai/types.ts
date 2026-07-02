@@ -55,6 +55,16 @@ export interface EmbeddingTouchpoint {
    */
   safety_factor?: number;
   /**
+   * Maximum number of input texts per embeddings request. Some providers
+   * cap request size by item count independent of tokens (DashScope
+   * text-embedding-v4: 10 texts/request). When set, the gateway further
+   * splits each token-budgeted batch into runs of at most this many texts,
+   * so small-chunk batches don't trip the provider's count limit and burn
+   * recursive-halving retries. Only consulted when `max_batch_tokens` is
+   * also set.
+   */
+  max_batch_items?: number;
+  /**
    * v0.27.1: when true, at least one model in this recipe accepts image
    * inputs via a multimodal embedding endpoint (e.g. Voyage's
    * /v1/multimodalembeddings). Drives gateway.embedMultimodal() routing.
