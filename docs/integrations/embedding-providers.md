@@ -67,7 +67,7 @@ The doctor distinguishes two repair paths:
 - **Local reranking (no API spend)**: `llama-server-reranker` recipe (v0.40.6.1) — point gbrain at your own `llama-server --reranking` instance running Qwen3-Reranker or self-hosted ZeroEntropy weights. Same `gateway.rerank()` seam, $0 per call. Walkthrough in [`docs/ai-providers/llama-server-reranker.md`](../ai-providers/llama-server-reranker.md).
 - **One key for many hosted models**: OpenRouter. Set `OPENROUTER_API_KEY` and use `openrouter:<provider>/<model>` for chat against GPT-5.2, Claude 4.x, Gemini 3, DeepSeek, and dozens more without juggling per-provider keys. Embedding catalog includes OpenAI, Google, Qwen, BGE-M3.
 - **Enterprise compliance**: Azure OpenAI (data residency + private endpoints) or self-hosted via llama-server / Ollama.
-- **China region**: DashScope (Alibaba) or Zhipu (BigModel). DashScope's international endpoint at `dashscope-intl.aliyuncs.com`; override `provider_base_urls.dashscope` for the China endpoint.
+- **China region**: DashScope (Alibaba) or Zhipu (BigModel). DashScope's `text-embedding-v4` is the current pick (Matryoshka up to 1536 offered). International endpoint at `dashscope-intl.aliyuncs.com` by default; China-region keys need the China endpoint via the file-plane `provider_base_urls.dashscope` override in `~/.gbrain/config.json`.
 - **OSS local, full control**: llama-server (`llama.cpp`) for any GGUF model; Ollama for the curated catalog.
 - **Anything else**: LiteLLM proxy. Run LiteLLM in front of any provider (Bedrock, Vertex, Cohere, Jina, Fireworks, etc.) and point gbrain at it via `LITELLM_BASE_URL`.
 
@@ -129,7 +129,13 @@ MiniMax's API takes a `type: 'db' | 'query'` field for asymmetric retrieval. v0.
 
 ### DashScope (Alibaba)
 
-Set `DASHSCOPE_API_KEY`. International endpoint at `dashscope-intl.aliyuncs.com` by default; override `provider_base_urls.dashscope` for the China endpoint. Models: `text-embedding-v3` (current; Matryoshka 64-1024 dims), `text-embedding-v2`.
+Set `DASHSCOPE_API_KEY`. Keys are region-scoped: a China (Beijing) console key only works against the China endpoint and vice versa. International endpoint at `dashscope-intl.aliyuncs.com` by default; for the China endpoint add the file-plane override to `~/.gbrain/config.json` (this key is NOT read from the DB plane, so `gbrain config set provider_base_urls.dashscope` will not take effect):
+
+```json
+"provider_base_urls": { "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1" }
+```
+
+Models: `text-embedding-v4` (current; Matryoshka 64-2048 dims — gbrain offers up to 1536 to stay under pgvector's 2000-dim HNSW cap; 10 texts/request, enforced via `max_batch_items`), `text-embedding-v3` (Matryoshka 64-1024), `text-embedding-v2`.
 
 CJK-dominant content tokenizes denser than OpenAI tiktoken; gbrain declares `chars_per_token: 2` so the batch pre-split leaves headroom.
 
