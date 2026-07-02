@@ -12,7 +12,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { ConnectionManager, deriveDirectUrl } from '../src/core/connection-manager.ts';
@@ -104,5 +104,20 @@ describe('loadConfig direct_database_url plumbing', () => {
     const cfg = loadConfig()!;
     expect(cfg.direct_database_url).toBeUndefined();
     expect(toEngineConfig(cfg).direct_database_url).toBeUndefined();
+  });
+});
+
+describe('bare-URL connect sites thread the direct override (static tripwire)', () => {
+  // init and migrate-engine construct EngineConfig from a raw URL (no
+  // loadConfig/toEngineConfig), so they must thread direct_database_url by
+  // hand. A refactor that drops it re-introduces the IPv6 init hang.
+  test('init.ts passes direct_database_url at its engine.connect call', () => {
+    const src = readFileSync(join(import.meta.dir, '../src/commands/init.ts'), 'utf8');
+    expect(src).toMatch(/database_url:\s*databaseUrl[\s\S]{0,600}direct_database_url:/);
+  });
+
+  test('migrate-engine.ts sets direct_database_url on targetConfig', () => {
+    const src = readFileSync(join(import.meta.dir, '../src/commands/migrate-engine.ts'), 'utf8');
+    expect(src).toMatch(/targetConfig\.direct_database_url\s*=/);
   });
 });

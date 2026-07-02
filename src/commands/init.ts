@@ -1085,7 +1085,15 @@ async function initPostgres(opts: {
   const engine = await createEngine({ engine: 'postgres' });
   try {
     try {
-      await engine.connect({ database_url: databaseUrl });
+      await engine.connect({
+        database_url: databaseUrl,
+        // Init builds its EngineConfig from the CLI/env URL directly (it
+        // predates any saved config), so the file-plane direct_database_url
+        // must be threaded by hand here or initSchema derives the IPv6-only
+        // db.<ref>.supabase.co host and hangs on IPv6-hostile networks.
+        direct_database_url:
+          process.env.GBRAIN_DIRECT_DATABASE_URL ?? loadConfigFileOnly()?.direct_database_url,
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (databaseUrl.includes('supabase.co') && (msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT'))) {
