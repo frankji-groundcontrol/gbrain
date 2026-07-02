@@ -3708,7 +3708,7 @@ export class PostgresEngine implements BrainEngine {
           FROM pg_attribute a
           JOIN pg_class c ON c.oid = a.attrelid
           JOIN pg_namespace n ON n.oid = c.relnamespace
-         WHERE n.nspname = 'public'
+         WHERE n.nspname = current_schema()
            AND c.relname = 'facts'
            AND a.attname = 'embedding'
            AND NOT a.attisdropped
