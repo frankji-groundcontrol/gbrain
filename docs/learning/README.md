@@ -22,6 +22,11 @@ belong in [`../../CLAUDE.md`](../../CLAUDE.md), not here.
 
 ## Records
 
+- [2026-07-03 — config planes, region-scoped keys, and IPv6 black-holes](2026-07-03-config-planes-and-china-networking.md)
+  — six lessons from a China-network Supabase + DashScope deployment: DB-plane
+  config writes that silently no-op, workspace-scoped API keys, the IPv6-only
+  direct host hang, search_path-as-startup-parameter, PostgREST read-only
+  STABLE RPCs, and pattern-based (never value-based) log redaction.
 - [2026-07-03 — reference-map rows can misroute on filename collisions](2026-07-03-reference-map-filename-collisions.md)
   — verify a router row's target covers the row's topic; filename match is not
   evidence.
