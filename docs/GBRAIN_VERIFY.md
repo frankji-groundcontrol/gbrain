@@ -122,7 +122,7 @@ This is the real test. Edit a brain page, push, wait, search.
 1. Edit a page in the brain repo (e.g., correct a fact on a person's page):
 
 ```bash
-# Example: fix a line in Gustaf's page
+# Example: fix a line in Alice's page
 cd /data/brain
 # Make a small edit to any .md file
 git add -A && git commit -m "test: verify live sync" && git push

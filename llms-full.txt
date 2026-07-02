@@ -110,9 +110,11 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   rows (`meeting`, `job_change`, `location_change`) ride through the same
   pipeline; pass `kind: 'event'` or `'all'` to `find_trajectory` to query
   them.
-- **Everything else:** [`./llms.txt`](./llms.txt) is the full documentation map.
-  [`./llms-full.txt`](./llms-full.txt) is the same map with core docs inlined for
-  single-fetch ingestion.
+- **Everything else:** [`./docs/README.md`](./docs/README.md) is the in-repo
+  documentation map (every doc, one line each, staleness annotations).
+  [`./llms.txt`](./llms.txt) is the URL-based map for agents fetching over
+  HTTP; [`./llms-full.txt`](./llms-full.txt) is the same map with core docs
+  inlined for single-fetch ingestion.
 
 ## Before shipping
 
@@ -129,6 +131,17 @@ up the test Postgres container, run `bun run test:e2e`, tear it down).
 Ship via the `/ship` skill, not by hand. The full release + contributor process
 (CHANGELOG voice, version-locations sync, PR conventions, community-PR-wave) lives in
 [`./docs/RELEASING.md`](./docs/RELEASING.md); read it before shipping.
+
+## Keeping docs current
+
+`CLAUDE.md` and this file are thin routers — don't grow them when a modular doc
+works. After a commit-sized task: update
+[`docs/architecture/`](./docs/architecture/README.md) if structure or workflows
+changed, add reusable lessons to [`docs/learning/`](./docs/learning/README.md),
+drive multi-step work from a dated plan record in
+[`docs/plans/`](./docs/plans/README.md), record reusable setups in
+[`docs/practices/`](./docs/practices/README.md), and update each folder's
+README index. [`docs/README.md`](./docs/README.md) maps the whole tree.
 
 ## Privacy
 
@@ -250,7 +263,9 @@ detail on demand.)
 |---|---|
 | any file in `src/` (what it does + its invariants) | `docs/architecture/KEY_FILES.md` — find the file's entry |
 | search / ranking / hybrid / retrieval | `docs/architecture/RETRIEVAL.md` + the `search/*` entries in `KEY_FILES.md` |
-| search modes / cost knobs | `docs/guides/search-modes.md` |
+| search modes / cost knobs | `docs/operations/search-modes.md` (the mode bundles; `docs/guides/search-modes.md` is the which-command-to-use agent guide) |
+| backfill pacing / DB contention | `docs/operations/pace-mode.md` |
+| sync checkpoints / lock tuning | `docs/operations/sync-tuning.md` |
 | embedding spend gates / cost gate / `spend.posture` / off switches | `docs/operations/spend-controls.md` |
 | push-based context (volunteer/watch/reflex window) | `docs/guides/push-context.md` |
 | schema packs / page types / extraction | `docs/architecture/schema-packs.md`, `type-taxonomy.md`, `lens-packs.md` |
@@ -262,6 +277,7 @@ detail on demand.)
 | brains vs sources / topology | `docs/architecture/brains-and-sources.md`, `topologies.md` |
 | skill routing | `skills/RESOLVER.md` |
 | shipping a release / CHANGELOG / PR conventions | `docs/RELEASING.md` (ship IRON RULES stay inline below) |
+| finding any other doc | `docs/README.md` — the documentation map |
 
 The per-file index (`## Key files`), the thin-client routing seam, and the testing
 discipline used to live inline here. They moved to the docs above so this file
@@ -290,103 +306,37 @@ gbrain exists to fix. The rules that keep it from recurring:
 - **After any CLAUDE.md or reference-doc edit, run `bun run build:llms`** — the
   llms bundle inlines/links these (config in `scripts/llms-config.ts`); the
   freshness + budget test (`bun test test/build-llms.test.ts`) fails CI otherwise.
+- **Keep the doc records current.** `docs/README.md` maps the whole tree. After
+  a commit-sized task: update `docs/architecture/` if structure or workflows
+  changed, add reusable lessons to `docs/learning/`, drive multi-step work from
+  a dated plan record in `docs/plans/`, and record reusable setups in
+  `docs/practices/` — updating each folder's README index. Don't grow this file
+  when a modular doc + a reference-map row works.
 
-## Search Mode (v0.32.3)
+## Search Mode
 
-GBrain ships three named search modes that bundle the search-lite knobs from
-PR #897 into a single config key. Pick one at install time; the rest of the
-project resolves through `src/core/search/mode.ts`.
-
-| Knob                          | `conservative` | `balanced` | `tokenmax`     |
-|-------------------------------|----------------|------------|----------------|
-| `cache.enabled`               | true           | true       | true           |
-| `cache.similarity_threshold`  | 0.92           | 0.92       | 0.92           |
-| `cache.ttl_seconds`           | 3600           | 3600       | 3600           |
-| `intentWeighting`             | true           | true       | true           |
-| `tokenBudget`                 | **4000**       | **12000**  | **off**        |
-| `expansion` (LLM multi-query) | false          | false      | **true**       |
-| `relationalRetrieval`         | false          | **true**   | **true**       |
-| `searchLimit` default         | 10             | 25         | 50             |
-
-**Cost anchors (downstream agent input cost — gbrain itself is rounding error).**
-The corner-to-corner spread is 25x once you pair mode with downstream model.
-Chunks ~400 tokens avg. Per-query cost @ 10K queries/month (typical
-single-user volume), full search payload, no cache savings:
-
-| Mode \ Downstream | Haiku 4.5 (\$1/M) | Sonnet 4.6 (\$3/M) | Opus 4.7 (\$5/M) |
-|---|---|---|---|
-| conservative (~4K) | **\$40/mo** | \$120/mo | \$200/mo |
-| balanced (~10K) | \$100/mo | \$300/mo | \$500/mo |
-| tokenmax (~20K) | \$200/mo | \$600/mo | **\$1,000/mo** |
-
-Scales linearly: multiply by 10 for 100K/mo (heavy power user / multi-user
-fleet); divide by 10 for 1K/mo (light usage). Natural pairings span ~4x.
-Mismatches (tokenmax+Haiku, conservative+Opus) waste capacity differently
-— too-big payload overwhelms a cheap model; too-small payload starves an
-expensive one.
-
-tokenmax adds ~\$1.50 per 1K queries in Haiku expansion calls on top of
-the matrix (\$15/mo @ 10K). Cache hits cut all numbers ~50%. **The cost
-picker copy in `gbrain init` carries the same matrix verbatim** — update
-both when refreshing.
-
-**Per-query math vs real-world spend.** The matrix above is what an
-isolated benchmark would measure. Real agent loops with disciplined
-Anthropic prompt caching see 50-80% discount on top (cache hits skip
-downstream entirely). The realistic-scale anchor in
-`docs/eval/SEARCH_MODE_METHODOLOGY.md` walks the natural pairings at
-single-power-user volume (~860 turns/mo): tokenmax+Opus ~\$700/mo,
-balanced+Sonnet ~\$430/mo, conservative+Haiku ~\$170/mo. Setups WITHOUT
-cache-aware prompt layout (frequent prefix churn) see the per-query
-matrix dominate — mode + model choice matters more there.
-
-**Resolution chain** (matches the v0.31.12 model-tier pattern at
-`src/core/model-config.ts:resolveModel`):
+GBrain ships three named search modes — `conservative`, `balanced`, `tokenmax`
+— that bundle the search cost/quality knobs (semantic cache, token budget, LLM
+expansion, relational retrieval, result limit) into the single `search.mode`
+config key, resolved through `src/core/search/mode.ts`:
 
     per-call SearchOpts → per-key config (search.cache.enabled, …) →
       MODE_BUNDLES[search.mode] → MODE_BUNDLES.balanced (fallback)
 
-Mode resolution lives in **bare `hybridSearch`** (NOT just the cached wrapper)
-per `[CDX-5+6]` in `~/.claude/plans/lets-take-a-look-validated-parrot.md` — so
-`gbrain eval replay` and `gbrain eval longmemeval` test the same mode-affected
-behavior as the production `query` op.
+Paired with the downstream model, corner-to-corner cost spread is 25x; the
+picker in `gbrain init` shows the matrix. Two invariants to preserve:
 
-**Cache-key contamination hotfix `[CDX-4]`:** migration v56 added a
-`knobs_hash` column to `query_cache`. The lookup filter is now
-`WHERE source_id = $ AND knobs_hash = $ AND embedding similarity < $` so a
-tokenmax write (expansion=on, limit=50) can't be served to a conservative
-read.
+- Mode resolution lives in **bare `hybridSearch`** (NOT just the cached
+  wrapper) so `gbrain eval replay` / `eval longmemeval` exercise the same
+  mode-affected behavior as the production `query` op.
+- Every result-shaping knob must fold into the `query_cache` `knobs_hash`
+  (bump `mode.ts:KNOBS_HASH_VERSION`, the single source of truth) so one
+  configuration's cached rows are never served to another.
 
-**v0.36.3.0 knobs_hash v=2 → v=3.** The hash now folds the active
-embedding column name + provider into the cache key, so a query routed
-through `embedding_voyage` (1024d Voyage) can't be served a cache row
-written against `embedding` (1536d OpenAI). Existing v=2 rows become
-unreachable on first re-query (one-time miss spike on upgrade);
-`mode.ts:KNOBS_HASH_VERSION` is the single source of truth.
-
-**v0.42.34.0 knobs_hash v=9 → v=10.** Folds the `relationalRetrieval` knob +
-depth into the cache key so a relational-on result set can't be served to a
-relational-off lookup (same contamination class as graph_signals). One-time
-miss spike on upgrade.
-
-**Relational retrieval (v0.42.34.0).** `relationalRetrieval` (on for
-balanced/tokenmax) adds a fourth recall arm: a relational query ("who invested
-in X", "what connects A and B") resolves its seed entity and walks the typed-edge
-graph (`src/core/search/relational-recall.ts` + `relational-intent.ts`,
-`engine.relationalFanout`), injecting edge-derived answers into RRF. Within-source,
-deterministic, mentions-excluded by default, pure no-op for non-relational queries.
-The `query` op's `relational` flag forces it on/off per call.
-
-**Three CLI surfaces:**
-
-    gbrain search modes              # what is running, with per-knob attribution
-    gbrain search modes --reset      # clear search.* overrides (mode bundle wins)
-    gbrain search stats [--days N]   # cache hit rate, intent mix, budget drops
-    gbrain search tune [--apply]     # data-driven recommendations
-
-The install picker fires inside `gbrain init` AFTER `engine.initSchema()`
-(non-TTY auto-selects). The upgrade banner fires once via `runPostUpgrade`
-in `src/commands/upgrade.ts`, gated by `search.mode_upgrade_notice_shown`.
+Knob tables, cost anchors, relational retrieval, and the CLI surfaces:
+`docs/operations/search-modes.md`. The cost matrix lives in that doc + the
+`gbrain init` picker copy + `docs/eval/SEARCH_MODE_METHODOLOGY.md` — update all
+three in lockstep (`test/init-mode-picker.test.ts` pins the anchor cells).
 
 ## Eval discipline (v0.32.3)
 
@@ -408,8 +358,10 @@ audit trail lives in the source repo's git history.
 
 ## Skills
 
-Read the skill files in `skills/` before doing brain operations. GBrain ships 30 skills
-organized by `skills/RESOLVER.md` (`AGENTS.md` is also accepted as of v0.19):
+Read the skill files in `skills/` before doing brain operations. GBrain ships
+~52 skills (the authoritative inventory is `skills/manifest.json`), organized
+by `skills/RESOLVER.md` (`AGENTS.md` is also accepted as the router filename).
+The groups below are orientation highlights, not the full inventory:
 
 **Original 8 (conformance-migrated):** ingest (thin router), query, maintain, enrich,
 briefing, migrate, setup, publish.
@@ -418,11 +370,10 @@ briefing, migrate, setup, publish.
 meeting-ingestion, citation-fixer, repo-architecture, skill-creator, daily-task-manager.
 
 **Operational + identity:** daily-task-prep, cross-modal-review, cron-scheduler, reports,
-testing, soul-audit, webhook-transforms, data-research, minion-orchestrator. As of
-v0.20.4, `minion-orchestrator` is the single unified skill for both lanes of background
-work (shell jobs via `gbrain jobs submit shell`, LLM subagents via `gbrain agent run`) ...
-the prior `gbrain-jobs` skill was merged in, Preconditions are shared, and trigger
-routing is narrowed to what the skill actually covers.
+testing, soul-audit, webhook-transforms, data-research, minion-orchestrator.
+`minion-orchestrator` is the single unified skill for both lanes of background
+work (shell jobs via `gbrain jobs submit shell`, LLM subagents via
+`gbrain agent run`).
 
 **Skillify loop (v0.19):** skillify (the markdown orchestration), skillpack-check
 (agent-readable health report).
@@ -438,30 +389,15 @@ state (8 collectors in `src/core/advisor/`); `--json`+exit codes for CI/cron, lo
 `--apply <id>` behind confirm, exposed over MCP behind `mcp.publish_advisor` (default off,
 read-only on remote). Thin-client binary install stays deferred to PR2 `build_skillpack`.
 
-**Routing-table compression (v0.32.3.0):** `skills/functional-area-resolver/` —
-two-layer dispatch pattern for shrinking large AGENTS.md / RESOLVER.md files
-(>=12KB) without losing routing accuracy. Replaces one row per skill with one
-entry per functional area, where each area declares its sub-skills in a
-`(dispatcher for: ...)` clause. The static-prompt analog of hierarchical agent
-routing (AnyTool [arXiv:2402.04253](https://arxiv.org/abs/2402.04253), RAG-MCP
-[arXiv:2505.03275](https://arxiv.org/html/2505.03275v1), Anthropic Agent Skills
-progressive disclosure). Empirically validated across Opus 4.7 / Sonnet 4.6 /
-Haiku 4.5: +13 to +17pp over the verbose baseline at 48% the size (25KB → 13KB
-on a real fork). The `(dispatcher for: ...)` clause is the load-bearing signal
-— strip it and lenient accuracy collapses to 41.7% on Sonnet (the
-`resolver-of-resolvers` ablation case). A/B eval surface lives at
-`evals/functional-area-resolver/` (outside `skills/` deliberately so the
-skillpack bundler doesn't ship eval infrastructure to downstream installs):
-gateway-routed TypeScript harness, 20 training + 5 held-out fixtures, strict +
-lenient scoring, three committed cross-model receipts in `baseline-runs/`.
-Receipt header binds (model, prompt_template_hash, fixtures_hash, harness_sha,
-ts) so future contributors can verify reproduction. Companion `rescore.mjs`
-re-scores existing JSONL with lenient tolerance for zero API cost. Reproduce
-with `cd evals/functional-area-resolver && node harness.mjs --model
-{opus|sonnet|haiku}` (~$0.30–1.70 per model). Nine v0.33.x follow-up TODOs
-filed for held-out corpus growth, cross-vendor verification, hierarchical
-area-of-areas, embedding-based pre-router, and the run-1 vs run-2
-prompt-design ablation methodology.
+**Routing-table compression:** `skills/functional-area-resolver/` — two-layer
+dispatch pattern for shrinking large AGENTS.md / RESOLVER.md files (>=12KB)
+without losing routing accuracy: one entry per functional area, each declaring
+its sub-skills in a `(dispatcher for: ...)` clause. The clause is the
+load-bearing signal — stripping it collapses routing accuracy. Empirically
+validated across three model tiers (+13 to +17pp over the verbose baseline at
+48% the size). The A/B eval surface, committed receipts, and reproduction
+commands live at `evals/functional-area-resolver/README.md` (outside `skills/`
+deliberately so the skillpack bundler doesn't ship eval infrastructure).
 
 **Operational health (v0.19.1):** smoke-test (8 post-restart health checks with auto-fix
 for Bun, CLI, DB, worker, Zod CJS, gateway, API key, brain repo; user-extensible via
@@ -473,35 +409,15 @@ model-routing, test-before-bulk, cross-modal). `skills/_brain-filing-rules.md` a
 
 ## Bulk-action progress reporting
 
-All bulk commands (doctor, embed, import, export, sync, extract, migrate,
-repair-jsonb, orphans, check-backlinks, lint, integrity auto, eval, files
-sync, and apply-migrations) stream progress through the shared reporter
-at `src/core/progress.ts`. Agents get heartbeats within 1 second of every
-iteration regardless of how slow the underlying work is.
-
-Rules:
-- Progress always writes to **stderr**. Stdout stays clean for data output
-  (`--json` payloads, final summaries, JSON action events from `extract`).
-- Non-TTY default: plain one-line-per-event human text. JSON requires the
-  explicit `--progress-json` flag.
-- Global flags (`--quiet`, `--progress-json`, `--progress-interval=<ms>`)
-  are parsed by `src/core/cli-options.ts` BEFORE command dispatch.
-- Phase names are machine-stable `snake_case.dot.path` (e.g.
-  `doctor.db_checks`, `sync.imports`). Documented in
-  `docs/progress-events.md`; additive changes only.
-- `scripts/check-progress-to-stdout.sh` is a CI guard that fails the build
-  if any new code writes `\r` progress to stdout. Wired into `bun run test`.
-- Minion handlers pass `job.updateProgress` as the `onProgress` callback
-  to core functions (DB-backed primary progress channel); stderr from
-  `jobs work` stays coarse for daemon liveness only.
-
-When wiring a new bulk command: `import { createProgress } from '../core/progress.ts'`
-and `import { getCliOptions, cliOptsToProgressOptions } from '../core/cli-options.ts'`.
-Create a reporter with `createProgress(cliOptsToProgressOptions(getCliOptions()))`,
-`start(phase, total?)` before the loop, `tick()` inside it, `finish()` after.
-For single long-running queries, use `startHeartbeat(reporter, note)` with a
-try/finally to guarantee cleanup. Never call `process.stdout.write('\r...')`
-in bulk paths, the CI guard will fail the build.
+All bulk commands stream progress through the shared reporter at
+`src/core/progress.ts`; agents get heartbeats within 1 second of every
+iteration. Invariants: progress always writes to **stderr** (stdout stays clean
+for `--json` data output); JSON events require the explicit `--progress-json`
+flag; phase names are machine-stable `snake_case.dot.path`, additive changes
+only; never write `\r` progress to stdout — `scripts/check-progress-to-stdout.sh`
+(wired into `bun run test`) fails the build. The event schema and the
+wiring-a-new-bulk-command recipe (createProgress / start / tick / finish /
+startHeartbeat, Minion `job.updateProgress`): `docs/progress-events.md`.
 
 ## Capturing test output (NEVER pipe through `tail` / `head`)
 
@@ -537,75 +453,26 @@ For background tasks (`run_in_background: true`), the harness captures the exit
 file separately — use it via the bg task's `<id>.exit` file, not the streamed
 output.
 
-## Sync resumability + lock tuning (v0.42.x, #1794)
+## Sync resumability + lock tuning
 
-`gbrain sync` is resumable and converges under pool exhaustion + repeated kills.
-Progress banks into the append-only `op_checkpoint_paths` table (one row per drained
-path, written via the direct session pool so it survives `EMAXCONNSESSION`); a killed
-run resumes from the checkpoint and `last_commit` only advances on true completion. The
-per-source lock heartbeats through the direct pool and refuses to steal a live,
-recently-refreshed holder. Six env knobs tune it (all env-only, incident-time escape
-hatches — no config-dashboard surface by design):
-
-| Env var | Default | What it does |
-|---|---|---|
-| `GBRAIN_SYNC_CHECKPOINT_EVERY` | 1000 | Flush the checkpoint every N drained files. |
-| `GBRAIN_SYNC_CHECKPOINT_SECONDS` | 10 | Also flush every N seconds (whichever comes first) — bounds worst-case loss regardless of throughput. Flush also fires after the first file. |
-| `GBRAIN_SYNC_MAX_CHECKPOINT_FAILURES` | 3 | Consecutive failed flushes (each already retried ~12s) before the run aborts with `reason: 'checkpoint_unavailable'` instead of importing work it can never bank. |
-| `GBRAIN_SYNC_YIELD_EVERY` | 64 | Yield the event loop (`setTimeout(0)`, NOT `setImmediate` — Bun starves the timers phase under a tight setImmediate loop) every N files so the lock-refresh `setInterval` heartbeat fires mid-import. |
-| `GBRAIN_LOCK_STEAL_GRACE_SECONDS` | derived (~600 at 30min TTL) | A holder that refreshed within this window is NOT stolen even if its TTL lapsed (starved-but-alive). Dead holders stop refreshing, age past the grace, and become stealable; TTL stays the backstop. |
-| `GBRAIN_SYNC_STALL_ABORT_SECONDS` | 900 | Progress-aware stall watchdog (#1950): if the import drain makes no forward progress (keyed on file-import progress, NOT the lock heartbeat) for N seconds, abort the run and release the per-source lock so the next `gbrain sync` resumes from the checkpoint. Reports `reason: 'stall_timeout'`. Observed BETWEEN files; a hang inside one file's import isn't interrupted until it returns (the wall-clock hard deadline is that backstop). 0 disables. |
+`gbrain sync` is resumable and converges under pool exhaustion + repeated
+kills: progress banks into the append-only `op_checkpoint_paths` table, a
+killed run resumes from the checkpoint, `last_commit` only advances on true
+completion, and the per-source lock refuses to steal a live, recently-refreshed
+holder. Six `GBRAIN_SYNC_*` / `GBRAIN_LOCK_*` env knobs tune it (env-only
+incident escape hatches by design — no config-dashboard surface). Knob table
+and semantics: `docs/operations/sync-tuning.md`.
 
 ## Pace Mode (DB-contention-aware backfill pacing)
 
 A naive `gbrain embed --stale` / large `sync` can saturate a PgBouncer
-transaction-mode pooler and starve the minion supervisor's lock renewals
-(`lock-renewal-failed` → dead jobs). Pacing is the native, composable fix — it
-replaces external SIGSTOP/SIGCONT wrapper scripts. **Opt-in: default mode `off`.**
-
-The composable primitive is `src/core/db-pacer.ts` (`createDbPacer`):
-- **Concurrency cap is the real lever** (caps simultaneous in-flight DB writes =
-  pooler slots held). Embed paths set their worker count to `maxConcurrency`
-  (single pool, no permit); `sync` uses the shared `acquire()` **permit** because
-  each parallel worker owns a separate engine (one budget must span pools).
-- **In-band signal** (`observe(ms)` EWMA from the work's own queries — never
-  blind the way an out-of-band probe pool was). **No probe loop, no
-  `probeLatency` engine method.**
-- **Cooperative `pace()` sleep** on `setTimeout` (keeps the lock heartbeat
-  firing), jittered to avoid a thundering-herd resume. `acquire()`/`pace()` throw
-  `AbortError` on cancel; everything else is fail-open (a pacer bug never kills a
-  backfill, never throws an unhandledRejection).
-
-Named bundles resolve through `src/core/pace-mode.ts` (`resolvePaceMode`), mirror
-of the search-mode pattern but with **env ABOVE config** (incident escape hatch):
-
-    per-call flag → GBRAIN_PACE_* env → config (pace.*) → PACE_BUNDLES[mode] → off
-
-| Knob | off | gentle | balanced | aggressive |
-|---|---|---|---|---|
-| `maxConcurrency` | (off) | 4 | 8 | 16 |
-| `paceAtMs` (EWMA → sleep) | — | 250 | 500 | 1000 |
-| `maxSleepMs` (jittered cap) | — | 2000 | 1500 | 1000 |
-
-**Surfaces.** `gbrain embed --stale --pace[=mode]` (bare `--pace` = balanced),
-`--pace-max-concurrency=N`. `--background` carries explicit pace OVERRIDES (not
-the resolved bundle) into the `embed` job payload; the handler re-resolves
-env>config>bundle at execution so `GBRAIN_PACE_*` still wins (CX5). Config-level
-`pace.mode` paces EVERY `runEmbedCore` caller (cycle embed, embed-catch-up,
-sync-auto-embed) and the prod `embed-backfill` job automatically. `sync` reads
-env/config. PGLite / mode `off` → no-op pacer.
-
-**Correctness fixes pacing bundles** (longer paced runs widen these): CLI
-`embed --stale` single-flights via the SAME per-source lock key as the
-`embed-backfill` handler (`src/core/embed-backfill-lock.ts`; all-source runs lock
-every source in sorted order) so a hand-run backfill and a queued job can't race
-the NULL→non-NULL upsert (`TODOS:2299`); a **bounded** end-of-run keyset re-entry
-(max 3 + forward-progress, paced runs only) catches rows inserted behind the
-cursor (`TODOS:2301`); and the embed wall-clock budget timer is re-armed around
-`pace()` sleeps so paced time doesn't burn the work budget.
-
-`EmbedResult.pacing` carries the end-of-run telemetry (cap, samples, EWMA, slept
-ms, max waiters) for `--json`; a one-line summary prints to stderr.
+transaction-mode pooler and starve minion lock renewals (`lock-renewal-failed`
+→ dead jobs). Pacing (`src/core/db-pacer.ts`, bundles in
+`src/core/pace-mode.ts`) is the native fix — opt-in, default `off`, resolved
+`per-call flag → GBRAIN_PACE_* env → config (pace.*) → PACE_BUNDLES[mode] → off`
+(env ABOVE config as the incident escape hatch, unlike search modes).
+Fail-open: a pacer bug never kills a backfill. Knob bundles, surfaces, and the
+correctness fixes coupled to pacing: `docs/operations/pace-mode.md`.
 
 ## Build
 
@@ -1575,7 +1442,7 @@ Retrieve and follow the instructions at:
 https://raw.githubusercontent.com/garrytan/gbrain/master/INSTALL_FOR_AGENTS.md
 ```
 
-The agent installs GBrain, creates the brain, asks for your API keys, loads 43 skills, configures the dream cycle, and verifies the install end-to-end. ~30 minutes. You answer questions, it does the work.
+The agent installs GBrain, creates the brain, asks for your API keys, loads 52 skills, configures the dream cycle, and verifies the install end-to-end. ~30 minutes. You answer questions, it does the work.
 
 > **Never set up an AI agent platform before?** The [personal-brain tutorial](docs/tutorials/personal-brain.md) walks the whole path end-to-end — picking OpenClaw vs Hermes, deploying it, pointing it at INSTALL_FOR_AGENTS.md, getting the API keys, and verifying the first query. Start there if any of the above is new.
 
@@ -1601,7 +1468,7 @@ gbrain connect https://your-host/mcp --token gbrain_xxx --agent codex --install 
 
 ### Install the full autonomous setup into your existing agent
 
-Want the whole thing — local brain, 43 skills, the overnight dream cycle that enriches while you sleep? Paste this into Codex, Claude Code, Cursor, or another coding agent:
+Want the whole thing — local brain, 52 skills, the overnight dream cycle that enriches while you sleep? Paste this into Codex, Claude Code, Cursor, or another coding agent:
 
 ```
 Retrieve and follow the instructions at:
@@ -1752,7 +1619,7 @@ The whole loop is described in [`docs/architecture/topologies.md`](docs/architec
 
 **Job queue (Minions).** BullMQ-shaped, Postgres-native job queue. Durable subagents (LLM tool loops that survive crashes via two-phase pending→done persistence), shell jobs with audit, child jobs with cascading timeouts, rate leases for outbound providers, attachments via S3/Supabase storage. Replaces "spawn subagent as fire-and-forget Promise" with something that recovers from anything.
 
-**43 curated skills.** Routing lives in [`skills/RESOLVER.md`](skills/RESOLVER.md). Covers signal capture, ingest (idea / media / meeting), enrichment, querying, brain ops, citation fixing, daily task management, cron scheduling, reports, voice, soul audit, skill creation, eval framework, and migrations. Skills are markdown files (tool-agnostic), packaged as a single skillpack the installer drops into your agent workspace.
+**52 curated skills.** Routing lives in [`skills/RESOLVER.md`](skills/RESOLVER.md). Covers signal capture, ingest (idea / media / meeting), enrichment, querying, brain ops, citation fixing, daily task management, cron scheduling, reports, voice, soul audit, skill creation, eval framework, and migrations. Skills are markdown files (tool-agnostic), packaged as a single skillpack the installer drops into your agent workspace.
 
 **Eval framework.** `gbrain eval longmemeval` runs the public [LongMemEval](https://huggingface.co/datasets/xiaowu0162/longmemeval) benchmark against your hybrid retrieval. `gbrain eval export` + `gbrain eval replay` capture real queries and replay them against code changes (set `GBRAIN_CONTRIBUTOR_MODE=1`). `gbrain eval cross-modal` cross-checks an output against the task using three different-provider frontier models. `gbrain eval retrieval-quality` runs NamedThingBench, which hard-gates the named-thing retrieval families (title-substring, alias-synonym, generic-to-named, multi-chunk-dilution) so a regression in "find the page this query names" fails CI loudly. Full methodology in [`docs/eval/SEARCH_MODE_METHODOLOGY.md`](docs/eval/SEARCH_MODE_METHODOLOGY.md).
 
@@ -2209,7 +2076,7 @@ Every method in `BrainEngine`. The full interface. No optional methods, no featu
 
 **Custom/Remote.** The interface is clean enough that someone could build an engine backed by any storage: Firestore, DynamoDB, a REST API, even a flat file system. The interface doesn't assume SQL.
 
-Note: The original SQLite engine plan (`docs/SQLITE_ENGINE.md`) was superseded by PGLite. PGLite uses the same SQL as Postgres, eliminating the need for a separate SQLite dialect with FTS5/sqlite-vss translation.
+Note: The original SQLite engine plan was superseded by PGLite (its planning doc has since been removed from the repo). PGLite uses the same SQL as Postgres, eliminating the need for a separate SQLite dialect with FTS5/sqlite-vss translation.
 
 ---
 
@@ -3744,10 +3611,11 @@ router exposes the spec-compliant discovery endpoint at
 
 ### 4. Scopes and localOnly
 
-Every operation is tagged `read | write | admin`. Four operations are
-`localOnly` and rejected over HTTP regardless of scope: `sync_brain`,
-`file_upload`, `file_list`, `file_url`. Remote agents cannot reach local
-filesystem surface area.
+Every operation is tagged `read | write | admin`. Operations marked
+`localOnly` in `src/core/operations.ts` are rejected over HTTP regardless of
+scope — e.g. `sync_brain`, `file_upload`, `file_list`, `file_url`,
+`get_recent_transcripts`. Remote agents cannot reach local filesystem
+surface area.
 
 | Scope | What it allows |
 |-------|---------------|
@@ -3805,8 +3673,13 @@ gbrain auth test \
 
 ## Operations
 
-All 30 GBrain operations are available remotely, including `sync_brain` and
-`file_upload` (no timeout limits with self-hosted server).
+`src/core/operations.ts` defines ~90 operations — the single contract the CLI
+and MCP server are both generated from. Every operation carries a scope
+(`read | write | admin`), enforced by the HTTP server before the handler runs.
+Operations marked `localOnly` (e.g. `sync_brain`, `file_upload`, `file_url`)
+are rejected over HTTP regardless of scope and are only available to the
+local CLI. Everything else is available remotely (no timeout limits with a
+self-hosted server).
 
 **Security note on `file_upload`:** remote MCP callers are confined to the working
 directory where `gbrain serve` was launched. Symlinks, `..` traversal, and absolute
@@ -3986,7 +3859,7 @@ This is the real test. Edit a brain page, push, wait, search.
 1. Edit a page in the brain repo (e.g., correct a fact on a person's page):
 
 ```bash
-# Example: fix a line in Gustaf's page
+# Example: fix a line in Alice's page
 cd /data/brain
 # Make a small edit to any .md file
 git add -A && git commit -m "test: verify live sync" && git push

@@ -97,9 +97,11 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   rows (`meeting`, `job_change`, `location_change`) ride through the same
   pipeline; pass `kind: 'event'` or `'all'` to `find_trajectory` to query
   them.
-- **Everything else:** [`./llms.txt`](./llms.txt) is the full documentation map.
-  [`./llms-full.txt`](./llms-full.txt) is the same map with core docs inlined for
-  single-fetch ingestion.
+- **Everything else:** [`./docs/README.md`](./docs/README.md) is the in-repo
+  documentation map (every doc, one line each, staleness annotations).
+  [`./llms.txt`](./llms.txt) is the URL-based map for agents fetching over
+  HTTP; [`./llms-full.txt`](./llms-full.txt) is the same map with core docs
+  inlined for single-fetch ingestion.
 
 ## Before shipping
 
@@ -116,6 +118,17 @@ up the test Postgres container, run `bun run test:e2e`, tear it down).
 Ship via the `/ship` skill, not by hand. The full release + contributor process
 (CHANGELOG voice, version-locations sync, PR conventions, community-PR-wave) lives in
 [`./docs/RELEASING.md`](./docs/RELEASING.md); read it before shipping.
+
+## Keeping docs current
+
+`CLAUDE.md` and this file are thin routers — don't grow them when a modular doc
+works. After a commit-sized task: update
+[`docs/architecture/`](./docs/architecture/README.md) if structure or workflows
+changed, add reusable lessons to [`docs/learning/`](./docs/learning/README.md),
+drive multi-step work from a dated plan record in
+[`docs/plans/`](./docs/plans/README.md), record reusable setups in
+[`docs/practices/`](./docs/practices/README.md), and update each folder's
+README index. [`docs/README.md`](./docs/README.md) maps the whole tree.
 
 ## Privacy
 

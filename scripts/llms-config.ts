@@ -83,6 +83,13 @@ export const SECTIONS: DocSection[] = [
         description: "Project overview, benchmarks, 30-minute setup.",
         path: "README.md",
       },
+      {
+        title: "docs/README.md",
+        description:
+          "The documentation map: every doc in the tree, one line each, with the record-system folders (plans, learning, practices, issues) and staleness annotations.",
+        path: "docs/README.md",
+        includeInFull: false,
+      },
     ],
   },
   {
@@ -122,6 +129,27 @@ export const SECTIONS: DocSection[] = [
         title: "docs/guides/live-sync.md",
         description: "Incremental markdown sync setup.",
         path: "docs/guides/live-sync.md",
+      },
+      {
+        title: "docs/operations/search-modes.md",
+        description:
+          "The named search mode bundles (conservative / balanced / tokenmax): knob tables, the cost matrix, resolution chain, cache-key hygiene, CLI surfaces.",
+        path: "docs/operations/search-modes.md",
+        includeInFull: false,
+      },
+      {
+        title: "docs/operations/pace-mode.md",
+        description:
+          "DB-contention-aware backfill pacing for embed/sync: mode bundles, env-above-config resolution, surfaces, coupled correctness fixes.",
+        path: "docs/operations/pace-mode.md",
+        includeInFull: false,
+      },
+      {
+        title: "docs/operations/sync-tuning.md",
+        description:
+          "Sync resumability + per-source lock tuning: the six GBRAIN_SYNC_* / GBRAIN_LOCK_* incident-time env knobs.",
+        path: "docs/operations/sync-tuning.md",
+        includeInFull: false,
       },
       {
         title: "docs/guides/cron-schedule.md",

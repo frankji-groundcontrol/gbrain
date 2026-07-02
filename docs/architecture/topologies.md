@@ -69,9 +69,9 @@ Nothing else here is special. The other two topologies are variations on
 
 ```
   ┌────────────┐                    ┌──────────────────┐
-  │ neuromancer│                    │    brain-host    │
+  │agent-laptop│                    │    brain-host    │
   │ ┌────────┐ │ HTTP MCP / OAuth   │  ┌────────────┐  │
-  │ │ Hermes │─┼───────────────────→│  │   gbrain   │──┼──→ Supabase
+  │ │OpenClaw│─┼───────────────────→│  │   gbrain   │──┼──→ Supabase
   │ │ agent  │ │                    │  │ serve --http│  │
   │ └────────┘ │                    │  └────────────┘  │
   │            │                    │   (with autopilot)│
@@ -80,7 +80,7 @@ Nothing else here is special. The other two topologies are variations on
   └────────────┘                    └──────────────────┘
 ```
 
-What you get: the agent on one machine ("neuromancer") consumes a brain
+What you get: the agent on one machine ("agent-laptop") consumes a brain
 hosted on another machine ("brain-host") over HTTP MCP with OAuth. The
 agent's machine has NO local engine. All queries, searches, embeddings,
 and indexing happen on the host.
@@ -102,7 +102,7 @@ instead of a local DB connection:
   "remote_mcp": {
     "issuer_url": "https://brain-host.local:3001",
     "mcp_url":    "https://brain-host.local:3001/mcp",
-    "oauth_client_id": "neuromancer-...",
+    "oauth_client_id": "agent-laptop-...",
     "oauth_client_secret": "..."  // or set GBRAIN_REMOTE_CLIENT_SECRET
   }
 }
@@ -122,13 +122,13 @@ at the remote host. `gbrain doctor` runs a dedicated thin-client check set
 gbrain init --supabase                         # or --pglite, doesn't matter
 gbrain serve --http --port 3001 --bind 0.0.0.0 # v0.34: bind explicitly for remote access
                                                 # (defaults to 127.0.0.1 since v0.34)
-gbrain auth register-client neuromancer \
+gbrain auth register-client agent-laptop \
   --grant-types client_credentials \
   --scopes read,write,admin                    # admin needed for ping/doctor
 
 # v0.34: source-scoped client (write to one source, federate reads across
 # multiple sources). Omit both flags for a v0.33-compatible super-client.
-gbrain auth register-client neuromancer-dept \
+gbrain auth register-client agent-laptop-dept \
   --grant-types client_credentials \
   --scopes read,write \
   --source dept-x \
@@ -140,7 +140,7 @@ Note both. **Scope must include `admin`** — `submit_job` (used by
 `gbrain remote ping`) and `run_doctor` (used by `gbrain remote doctor`)
 both require it.
 
-**Step 2 — On the thin client (neuromancer):**
+**Step 2 — On the thin client (agent-laptop):**
 
 ```bash
 gbrain init --mcp-only \
@@ -157,7 +157,7 @@ is created.
 
 **Step 3 — Configure your agent's MCP client.**
 
-For Claude Desktop / Hermes / openclaw, add a single MCP server entry
+For Claude Desktop / your OpenClaw, add a single MCP server entry
 pointing at the host's `mcp_url` with the bearer token from `register-client`.
 Example for Claude Desktop's `~/.config/claude/claude_desktop_config.json`:
 
@@ -223,7 +223,7 @@ Three storage paths in priority order:
   │  │  gbrain serve --port 3000 │──────────────────────→ remote artifacts
   │  └───────────────────────────┘                        (Supabase / brain-host)
   │                                                      │
-  │  Agent's MCP config (Hermes / Claude Desktop):       │
+  │  Agent's MCP config (your OpenClaw / Claude Desktop):│
   │    mcp__gbrain_code__*       → http://localhost:3001 │
   │    mcp__gbrain_artifacts__*  → http://brain-host/mcp │
   └──────────────────────────────────────────────────────┘

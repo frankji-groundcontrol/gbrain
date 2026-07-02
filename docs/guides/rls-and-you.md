@@ -26,8 +26,8 @@ Doctor's message names every table missing RLS and gives you a `ALTER TABLE`
 line per table:
 
 ```
-1 table(s) WITHOUT Row Level Security: expenses_ramp.
-Fix: ALTER TABLE "public"."expenses_ramp" ENABLE ROW LEVEL SECURITY;
+1 table(s) WITHOUT Row Level Security: expenses_example.
+Fix: ALTER TABLE "public"."expenses_example" ENABLE ROW LEVEL SECURITY;
 If a table should stay readable by the anon key on purpose, see
 docs/guides/rls-and-you.md for the GBRAIN:RLS_EXEMPT comment escape hatch.
 ```
@@ -45,7 +45,7 @@ amount of time at all.
 on every newly created `public.*` table. It covers `CREATE TABLE`,
 `CREATE TABLE AS … SELECT`, and `SELECT … INTO` — every syntax Postgres
 reports as a table-creation command. Tables created by gbrain itself, by
-your other apps sharing the same Supabase project (Baku, Hermes, anything),
+your other apps sharing the same Supabase project (acme-app, your OpenClaw, anything),
 or by a human running raw SQL all get RLS enabled the moment they exist.
 Non-`public` schemas (`auth`, `storage`, `realtime`, etc.) are explicitly
 ignored — Supabase manages those, and we should not touch them.
@@ -71,7 +71,7 @@ prevent a re-flip on a later doctor run. No data is lost.
 
 ### Cross-app implications
 
-If a non-gbrain app (Baku, Hermes, a script you wrote, anything) creates
+If a non-gbrain app (acme-app, your OpenClaw, a script you wrote, anything) creates
 tables in the same Supabase project, the trigger will enable RLS on those
 tables too. Two ways to handle that:
 
@@ -145,15 +145,15 @@ Rules:
 ### Example
 
 ```sql
-ALTER TABLE public.expenses_ramp DISABLE ROW LEVEL SECURITY;
-COMMENT ON TABLE public.expenses_ramp IS
-  'GBRAIN:RLS_EXEMPT reason=analytics-only, anon-readable ok, owner=garry, 2026-04-22';
+ALTER TABLE public.expenses_example DISABLE ROW LEVEL SECURITY;
+COMMENT ON TABLE public.expenses_example IS
+  'GBRAIN:RLS_EXEMPT reason=analytics-only, anon-readable ok, owner=alice, 2026-04-22';
 ```
 
 After that, `gbrain doctor` reports:
 
 ```
-rls: ok — RLS enabled on 20/21 public tables (1 explicitly exempt: expenses_ramp)
+rls: ok — RLS enabled on 20/21 public tables (1 explicitly exempt: expenses_example)
 ```
 
 Note that every subsequent run re-enumerates your exemptions by name. That's
@@ -197,8 +197,8 @@ If that list is longer than you remember signing off on, that's the signal.
 Just drop the comment and re-enable RLS:
 
 ```sql
-ALTER TABLE public.expenses_ramp ENABLE ROW LEVEL SECURITY;
-COMMENT ON TABLE public.expenses_ramp IS NULL;
+ALTER TABLE public.expenses_example ENABLE ROW LEVEL SECURITY;
+COMMENT ON TABLE public.expenses_example IS NULL;
 ```
 
 `gbrain doctor` stops listing the table as exempt and goes back to checking

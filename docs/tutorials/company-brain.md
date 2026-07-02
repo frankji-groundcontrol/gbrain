@@ -382,7 +382,7 @@ Repeat this flow for every new teammate. About 45 minutes per person, total. Com
 
 ## Part 10: Connect each teammate's AI client
 
-Each teammate runs their AI client (Claude Code, Cursor, Claude Desktop, OpenClaw, Hermes, whatever) configured to point at your brain server through their OAuth credentials.
+Each teammate runs their AI client (Claude Code, Cursor, Claude Desktop, their own OpenClaw, whatever) configured to point at your brain server through their OAuth credentials.
 
 Recommended path for each teammate: the thin-client install. On their machine:
 
@@ -414,7 +414,7 @@ Now they configure their AI client. For Claude Desktop, the teammate adds an MCP
 
 When Claude Desktop launches, it talks to the local `gbrain serve` stdio bridge, which forwards every request to your remote brain over HTTPS with their OAuth token attached. From Claude Desktop's perspective it's just one MCP server.
 
-For Claude Code, Cursor, OpenClaw, Hermes, and other clients, per-client setup steps live in [`docs/mcp/`](../mcp/). They all follow the same shape: point the agent at the local `gbrain serve` bridge, which knows about the remote.
+For Claude Code, Cursor, OpenClaw, and other clients, per-client setup steps live in [`docs/mcp/`](../mcp/). They all follow the same shape: point the agent at the local `gbrain serve` bridge, which knows about the remote.
 
 ---
 
@@ -531,7 +531,7 @@ Each parallel sync worker opens its own pool. With three sources and the default
 ### "I want to add a fourth teammate but they need access to all three sources"
 
 ```bash
-gbrain auth register-client diana-example \
+gbrain auth register-client charlie-example \
   --grant-types client_credentials \
   --scopes read,write \
   --source shared \

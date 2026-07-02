@@ -7,10 +7,10 @@ Every inbound message gets scanned for original thinking AND entity mentions so 
 ## What the User Gets
 
 Without this: the agent answers questions but forgets everything. You mention
-Pedro in a meeting, and next week the agent doesn't know who Pedro is.
+Alice in a meeting, and next week the agent doesn't know who Alice is.
 
 With this: every person, company, and idea mentioned in conversation gets a
-brain page. Next time Pedro comes up, the agent already has context. The
+brain page. Next time Alice comes up, the agent already has context. The
 brain compounds.
 
 ## Implementation
@@ -128,21 +128,21 @@ Every entity mention MUST create a back-link FROM the entity page TO the
 source. This is not optional.
 
 ```
-// When message mentions "Pedro" and creates a meeting page:
+// When message mentions "Alice" and creates a meeting page:
 
 // 1. Update the meeting page (normal)
 brain/meetings/2026-04-10-board-sync.md:
-  - Pedro presented Q1 numbers
+  - Alice presented Q1 numbers
 
-// 2. ALSO update Pedro's page (back-link)
-brain/people/pedro-franceschi.md:
+// 2. ALSO update Alice's page (back-link)
+brain/people/alice-chen.md:
   ## Timeline
   - **2026-04-10** | Presented Q1 numbers at board sync
     [Source: User, board meeting, 2026-04-10]
 ```
 
 Without back-links, you can't traverse the graph. "Show me everything related
-to Pedro" only works if Pedro's page links back to every mention.
+to Alice" only works if Alice's page links back to every mention.
 
 ## Tricky Spots
 
@@ -163,12 +163,12 @@ to Pedro" only works if Pedro's page links back to every mention.
 
 5. **Dedup before creating.** Always `gbrain search` before creating a page.
    Variant spellings, nicknames, and company abbreviations cause duplicates.
-   "Pedro Franceschi" and "Pedro" might be the same person.
+   "Alice Chen" and "Alice" might be the same person.
 
 ## How to Verify
 
-1. **Send a message mentioning a person.** Say "I had coffee with Sarah Chen
-   from Acme Corp today." Verify: brain/people/sarah-chen.md was created or
+1. **Send a message mentioning a person.** Say "I had coffee with Charlie Wu
+   from Acme Corp today." Verify: brain/people/charlie-wu.md was created or
    updated, brain/companies/acme-corp.md was created or updated, both have
    timeline entries with today's date.
 
@@ -176,13 +176,13 @@ to Pedro" only works if Pedro's page links back to every mention.
    software as markdown files that agents execute?" Verify:
    brain/originals/{slug}.md was created with your exact phrasing.
 
-3. **Check back-links.** Open Sarah Chen's page. It should have a timeline
+3. **Check back-links.** Open Charlie Wu's page. It should have a timeline
    entry linking back to today's conversation. Open Acme Corp's page. Same.
 
 4. **Send a boring message.** Say "ok sounds good." Verify: nothing was
    created. The detector should report "No signals detected."
 
-5. **Check for duplicates.** Mention "Pedro" then later "Pedro Franceschi."
+5. **Check for duplicates.** Mention "Alice" then later "Alice Chen."
    Verify: one page, not two.
 
 ---

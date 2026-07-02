@@ -104,8 +104,8 @@ on nightly_schedule("02:00"):
 
 1. **The dream cycle is the most important discipline.** Brains compound overnight. Entity sweeps fix broken graphs, citation audits catch sourceless facts, and memory consolidation keeps compiled truth current. Skip the dream cycle and the brain slowly rots.
 2. **Skipping Discipline 3 (sync after write) means stale search results.** You write a page, then immediately search for it -- and get nothing back. The page exists but isn't indexed. Always sync after writes.
-3. **Signal detection must fire on EVERY message.** Not just messages that look important. The user says "I talked to Pedro yesterday about the board seat" in passing -- that's a timeline entry on Pedro's page, a potential update to his State section, and a signal about the board. If the agent doesn't catch it, the system is broken.
-4. **Brain-first saves money AND gives better answers.** The brain has context that external APIs don't: relationship history, meeting notes, the user's own assessment. An API lookup for "Pedro Franceschi" returns a LinkedIn profile. The brain returns the full picture including private context.
+3. **Signal detection must fire on EVERY message.** Not just messages that look important. The user says "I talked to Alice yesterday about the board seat" in passing -- that's a timeline entry on Alice's page, a potential update to her State section, and a signal about the board. If the agent doesn't catch it, the system is broken.
+4. **Brain-first saves money AND gives better answers.** The brain has context that external APIs don't: relationship history, meeting notes, the user's own assessment. An API lookup for "Alice Chen" returns a LinkedIn profile. The brain returns the full picture including private context.
 5. **`gbrain doctor` catches silent failures.** Embedding pipelines can stall, sync can fail silently, database connections can drop. The daily heartbeat catches these before they compound into data loss.
 
 ## How to Verify

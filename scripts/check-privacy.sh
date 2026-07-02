@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# check-privacy.sh — CLAUDE.md:550 enforcement.
+# check-privacy.sh — enforcement of the CLAUDE.md Privacy rule ("scrub real names from public docs").
 #
 # CLAUDE.md forbids the private OpenClaw fork name in public artifacts:
 # CHANGELOG.md, README.md, docs/, skills/, PR titles + bodies, commit
@@ -210,7 +210,7 @@ done <<< "$FILES"
 if [ "$FOUND" -eq 1 ]; then
   echo "" >&2
   echo "The private OpenClaw fork name is banned in public artifacts." >&2
-  echo "CLAUDE.md:550. Replace with 'your OpenClaw', 'OpenClaw reference deployment', or 'openclaw-reference'." >&2
+  echo "CLAUDE.md Privacy rule. Replace with 'your OpenClaw', 'OpenClaw reference deployment', or 'openclaw-reference'." >&2
   exit 1
 fi
 

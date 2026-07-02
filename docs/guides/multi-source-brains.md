@@ -31,36 +31,36 @@ gbrain sync --source gstack
 Result: wiki pages and gstack plans are separate (different source_ids,
 different slug namespaces) but share the search surface.
 
-### 2. Purpose-separated brains (yc-media + garrys-list)
+### 2. Purpose-separated brains (fund-a-media + alices-list)
 
 You run two completely different content pipelines on the same backend.
-YC Media covers portfolio news and founder profiles. Garry's List is
-personal writing. You explicitly DON'T want them mixed in search — YC
+Fund A Media covers portfolio news and founder profiles. Alice's List is
+personal writing. You explicitly DON'T want them mixed in search — Fund A
 portfolio content leaking into essay searches is a bug, not a feature.
 
 ```bash
 # Two sources, both isolated (federated=false)
-gbrain sources add yc-media --path ~/yc-media --no-federated
-gbrain sources add garrys-list --path ~/writing --no-federated
+gbrain sources add fund-a-media --path ~/fund-a-media --no-federated
+gbrain sources add alices-list --path ~/writing --no-federated
 
 # Pin each checkout directory
-(cd ~/yc-media && gbrain sources attach yc-media)
-(cd ~/writing && gbrain sources attach garrys-list)
+(cd ~/fund-a-media && gbrain sources attach fund-a-media)
+(cd ~/writing && gbrain sources attach alices-list)
 
 # Sync each independently
-gbrain sync --source yc-media
-gbrain sync --source garrys-list
+gbrain sync --source fund-a-media
+gbrain sync --source alices-list
 ```
 
 Result: searching from neither directory returns the `default` source
-(your main brain). Searching from inside `~/yc-media` returns only yc-
-media hits. Searching from inside `~/writing` returns only garrys-list.
+(your main brain). Searching from inside `~/fund-a-media` returns only fund-a-
+media hits. Searching from inside `~/writing` returns only alices-list.
 Federation is opt-in, not leaked.
 
 To search across them explicitly on demand:
 
 ```bash
-gbrain search "tech layoffs" --source yc-media,garrys-list
+gbrain search "tech layoffs" --source fund-a-media,alices-list
 ```
 
 ### 3. Mixed (wiki federated + sessions isolated)

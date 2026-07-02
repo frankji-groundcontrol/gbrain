@@ -15,7 +15,7 @@ on user_asks_about(topic):
     if know_exact_slug(topic):
         # MODE 3: Direct get -- instant, no search overhead
         result = gbrain get <slug>
-        # e.g., "Tell me about Pedro" -> gbrain get pedro-franceschi
+        # e.g., "Tell me about Alice" -> gbrain get alice-chen
         # Returns the FULL page -- compiled truth + timeline
 
     elif topic.is_exact_name or topic.is_keyword:
@@ -62,15 +62,15 @@ on user_asks_about(topic):
 
 1. **Search returns chunks, not full pages.** After `gbrain search` or `gbrain query`, you get excerpts. Always run `gbrain get <slug>` to load the full page when the chunk confirms relevance. Don't answer questions from chunks alone when the full context matters.
 2. **Keyword search works without embeddings.** On day one before any embedding run, `gbrain search` still works. Don't tell the user "search isn't available yet" -- keyword search is always available.
-3. **Don't use hybrid search for known names.** `gbrain query "Pedro Franceschi"` wastes embedding compute. Use `gbrain search "Pedro Franceschi"` or better yet `gbrain get pedro-franceschi` if you know the slug.
-4. **Token budget awareness.** A full page via `gbrain get` can be large. Read the search chunks first to confirm relevance before pulling the full page. "Did anyone mention the Series A?" -- search results (chunks) are probably enough. "Tell me everything about Pedro" -- get the full page.
+3. **Don't use hybrid search for known names.** `gbrain query "Alice Chen"` wastes embedding compute. Use `gbrain search "Alice Chen"` or better yet `gbrain get alice-chen` if you know the slug.
+4. **Token budget awareness.** A full page via `gbrain get` can be large. Read the search chunks first to confirm relevance before pulling the full page. "Did anyone mention the Series A?" -- search results (chunks) are probably enough. "Tell me everything about Alice" -- get the full page.
 5. **Hybrid search needs embeddings to have been run.** If `gbrain query` returns nothing but `gbrain search` finds results, the embeddings haven't been generated yet. Run the embedding pipeline first.
 
 ## How to Verify
 
-1. Run `gbrain search "Pedro"` -- confirm it returns chunks with matching text and slug references.
+1. Run `gbrain search "Alice"` -- confirm it returns chunks with matching text and slug references.
 2. Run `gbrain query "who works at fintech companies"` -- confirm it returns semantically relevant results (not just keyword matches on "fintech").
-3. Run `gbrain get pedro-franceschi` -- confirm it returns the full page with compiled truth and timeline.
+3. Run `gbrain get alice-chen` -- confirm it returns the full page with compiled truth and timeline.
 4. Compare: search for the same entity using all three modes. Keyword should be fastest, hybrid should surface conceptual matches, direct should return the complete page.
 5. After a search returns a chunk, run `gbrain get` on the slug from that chunk. Confirm the full page contains more context than the chunk alone.
 

@@ -42,7 +42,7 @@ These require manual setup (no self-installing recipe yet):
 
 | Guide | What It Does |
 |-------|-------------|
-| [Credential Gateway](credential-gateway.md) | Set up ClawVisor or Hermes for Gmail, Calendar, Contacts access |
+| [Credential Gateway](credential-gateway.md) | Set up ClawVisor or your OpenClaw's gateway for Gmail, Calendar, Contacts access |
 | [Meeting & Call Webhooks](meeting-webhooks.md) | Circleback meeting transcripts + Quo/OpenPhone SMS/calls |
 
 ## How to Read a Recipe
@@ -75,7 +75,7 @@ setup_time: 30 min              # estimated time to complete setup
 [Setup instructions the agent follows step by step...]
 ```
 
-**The recipe IS the installer.** Your agent (OpenClaw, Hermes, Claude Code) reads
+**The recipe IS the installer.** Your agent (OpenClaw, Claude Code) reads
 the markdown body and executes the setup steps. It asks you for API keys, validates
 each one, configures the integration, and runs a smoke test.
 

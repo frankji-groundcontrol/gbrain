@@ -8,7 +8,7 @@
 
 ## What Happened
 
-A user ran `gbrain lsd "what story should Garry's List write next" --yes` on a 13,690-page brain. The command:
+A user ran `gbrain lsd "what story should Alice's List write next" --yes` on a 13,690-page brain. The command:
 
 1. **Estimated cost: $0.96** (2×12 = 24 crosses × 4 ideas + judge)
 2. **Actual cost: $50.71** — 53× over estimate
@@ -29,7 +29,7 @@ A retry with `--limit 12` explicit:
 
 **File:** `src/core/brainstorm/domain-bank.ts` → `fetchFar()` → `listPrefixSampledPages()`
 
-The domain bank samples pages by directory prefix to get diversity. `listPrefixSampledPages` returns **one page per prefix passed in**. On a 13K-page brain with ~2,000 unique prefixes (books/, civic/bundles/, civic/gl-article-*, people/, concepts/, etc.), passing all prefixes produces ~2,000 rows — not the configured `m=12`.
+The domain bank samples pages by directory prefix to get diversity. `listPrefixSampledPages` returns **one page per prefix passed in**. On a 13K-page brain with ~2,000 unique prefixes (books/, civic/bundles/, civic/al-article-*, people/, concepts/, etc.), passing all prefixes produces ~2,000 rows — not the configured `m=12`.
 
 The cost estimator uses `m` (12) to predict crosses and cost. But the actual cross phase receives 1,985 far-set pages, producing `2 × 1985 = 3,970` crosses at 4 ideas each = 15,868 ideas.
 

@@ -264,4 +264,4 @@ Every method in `BrainEngine`. The full interface. No optional methods, no featu
 
 **Custom/Remote.** The interface is clean enough that someone could build an engine backed by any storage: Firestore, DynamoDB, a REST API, even a flat file system. The interface doesn't assume SQL.
 
-Note: The original SQLite engine plan (`docs/SQLITE_ENGINE.md`) was superseded by PGLite. PGLite uses the same SQL as Postgres, eliminating the need for a separate SQLite dialect with FTS5/sqlite-vss translation.
+Note: The original SQLite engine plan was superseded by PGLite (its planning doc has since been removed from the repo). PGLite uses the same SQL as Postgres, eliminating the need for a separate SQLite dialect with FTS5/sqlite-vss translation.

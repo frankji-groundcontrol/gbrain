@@ -189,3 +189,39 @@ for liveness only. Per-page detail lives in the DB.
 
 If your agent depends on this schema and something surprises you, open
 an issue with the event you received and what you expected.
+
+## Wiring a new bulk command (contributors)
+
+Every bulk command streams through the shared reporter at
+`src/core/progress.ts` so agents get heartbeats within 1 second of every
+iteration regardless of how slow the underlying work is.
+
+```ts
+import { createProgress } from '../core/progress.ts';
+import { getCliOptions, cliOptsToProgressOptions } from '../core/cli-options.ts';
+
+const reporter = createProgress(cliOptsToProgressOptions(getCliOptions()));
+reporter.start('myphase.subphase', total); // before the loop
+reporter.tick();                            // inside it
+reporter.finish();                          // after
+```
+
+Rules:
+
+- Progress always writes to **stderr**. Stdout stays clean for data output
+  (`--json` payloads, final summaries, JSON action events from `extract`).
+- Non-TTY default is plain one-line-per-event human text; JSON requires the
+  explicit `--progress-json` flag.
+- Global flags (`--quiet`, `--progress-json`, `--progress-interval=<ms>`) are
+  parsed by `src/core/cli-options.ts` BEFORE command dispatch.
+- Phase names are machine-stable `snake_case.dot.path` (e.g.
+  `doctor.db_checks`, `sync.imports`), documented on this page; additive
+  changes only.
+- For single long-running queries, use `startHeartbeat(reporter, note)` with a
+  try/finally to guarantee cleanup.
+- Never call `process.stdout.write('\r...')` in bulk paths —
+  `scripts/check-progress-to-stdout.sh` (wired into `bun run test`) fails the
+  build if any new code writes `\r` progress to stdout.
+- Minion handlers pass `job.updateProgress` as the `onProgress` callback to
+  core functions (DB-backed primary progress channel); stderr from `jobs work`
+  stays coarse for daemon liveness only.

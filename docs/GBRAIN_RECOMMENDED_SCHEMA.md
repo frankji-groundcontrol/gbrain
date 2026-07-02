@@ -162,7 +162,7 @@ In a system fed by meetings, email, social media, contacts, and APIs, **entity i
 Every entity gets a canonical slug that serves as its stable ID:
 - People: `first-last.md` (all lowercase, hyphens for spaces)
 - Companies: `company-name.md`
-- If collisions arise, disambiguate: `david-liu-crustdata.md`, `david-liu-meta.md`
+- If collisions arise, disambiguate: `charlie-wu-crustdata.md`, `charlie-wu-meta.md`
 
 The filename IS the identity. All references, cross-links, and .raw/ sidecars use this slug.
 
@@ -171,7 +171,7 @@ The filename IS the identity. All references, cross-links, and .raw/ sidecars us
 People have many names across sources. The frontmatter `aliases` field captures all known variants:
 
 ```yaml
-aliases: ["Jenny Shao", "Jenny G. Shao", "JennyGShao", "jennifer.shao@company.com"]
+aliases: ["Alice Chen", "Alice J. Chen", "AliceJChen", "alice.chen@example.com"]
 ```
 
 Aliases include: misspellings from meeting transcripts, maiden names, nicknames, email addresses, social handles, and phonetic variants. When the enrich skill encounters a new name variant for a known entity, it adds the variant to aliases — it does NOT create a new page.
@@ -671,7 +671,7 @@ A cron job fires at 3:00 PM daily with the prompt: "Read skills/meeting-ingestio
 
 **Step 2: Pull new meetings.** The agent calls the meeting history data source skill (in this system, Circleback). It checks a state file (`memory/meeting-notes-state.json`) that tracks the last processed meeting ID. Finds 2 new meetings since last run.
 
-**Step 3: Process Meeting 1 — "Product Review with Sarah Chen and Mike Torres."**
+**Step 3: Process Meeting 1 — "Product Review with Charlie Wu and Mike Torres."**
 
 The agent creates `brain/meetings/2026-04-07-product-review.md` with:
 - Its own analysis above the line (not a copy of the AI summary — reframed through what the brain already knows about the attendees and the project)
@@ -680,7 +680,7 @@ The agent creates `brain/meetings/2026-04-07-product-review.md` with:
 
 **Step 4: Enrich attendees.**
 
-For **Sarah Chen** — the agent searches the brain: `grep -rl "Sarah Chen" /data/brain/people/`. Finds `people/sarah-chen.md`. Reads it. Page was last enriched 2 weeks ago and has good coverage. → **Tier 3**: extract signal from this meeting only. Appends to her timeline: "2026-04-07 | Meeting — Pushed back on timeline for launch, wants more QA. Concerned about API stability." Updates her Open Threads with the new follow-up item.
+For **Charlie Wu** — the agent searches the brain: `grep -rl "Charlie Wu" /data/brain/people/`. Finds `people/charlie-wu.md`. Reads it. Page was last enriched 2 weeks ago and has good coverage. → **Tier 3**: extract signal from this meeting only. Appends to her timeline: "2026-04-07 | Meeting — Pushed back on timeline for launch, wants more QA. Concerned about API stability." Updates her Open Threads with the new follow-up item.
 
 For **Mike Torres** — brain search finds `people/mike-torres.md`. Page exists but is thin: just a name, title, and one previous meeting entry. → **Tier 2**: web search + social + brain cross-reference. Agent finds his recent blog posts (feeds into What They Believe), his X activity (feeds into Hobby Horses), and cross-references him with two other brain pages that mention him. Updates compiled truth above the line.
 
@@ -710,7 +710,7 @@ brain/
 │   ├── 2026-04-07-product-review.md          (CREATED)
 │   └── 2026-04-07-investor-sync.md           (CREATED)
 ├── people/
-│   ├── sarah-chen.md                          (UPDATED — timeline + open threads)
+│   ├── charlie-wu.md                          (UPDATED — timeline + open threads)
 │   ├── mike-torres.md                         (UPDATED — Tier 2 enrichment)
 │   ├── alex-rivera.md                         (CREATED — Tier 1 enrichment)
 │   └── .raw/

@@ -81,10 +81,10 @@ describe('recommendModeFor — auto-suggestion heuristic', () => {
   });
 });
 
-describe('MENU_TEXT cost-matrix anchors (must match CLAUDE.md + methodology doc)', () => {
+describe('MENU_TEXT cost-matrix anchors (must match docs/operations/search-modes.md + methodology doc)', () => {
   test('25x corner-to-corner spread framing is named', async () => {
     const { MODE_PICKER_MENU } = await import('../src/commands/init-mode-picker.ts');
-    // Updating these REQUIRES bumping CLAUDE.md ## Search Mode + the
+    // Updating these REQUIRES bumping docs/operations/search-modes.md + the
     // methodology doc + README in lockstep.
     expect(MODE_PICKER_MENU).toContain('25x');
     expect(MODE_PICKER_MENU).toContain('corner-to-corner');
@@ -94,7 +94,8 @@ describe('MENU_TEXT cost-matrix anchors (must match CLAUDE.md + methodology doc)
     const { MODE_PICKER_MENU } = await import('../src/commands/init-mode-picker.ts');
     // Three anchor cells from the natural diagonal at 10K/mo volume. Scales
     // linearly; multiplying by 10 gives the 100K/mo numbers the methodology
-    // doc + CLAUDE.md cite ("multiply by 10 for 100K/mo" prose anchor).
+    // doc + docs/operations/search-modes.md cite ("multiply by 10 for
+    // 100K/mo" prose anchor).
     expect(MODE_PICKER_MENU).toContain('$40/mo');     // conservative + Haiku
     expect(MODE_PICKER_MENU).toContain('$300/mo');    // balanced + Sonnet (default natural)
     expect(MODE_PICKER_MENU).toContain('$1,000/mo');  // tokenmax + Opus

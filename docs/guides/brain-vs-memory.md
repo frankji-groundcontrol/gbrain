@@ -17,10 +17,10 @@ on new_information(info):
         # This is world knowledge -- facts about entities external to the agent
         gbrain put <slug> --content "..."
         # Examples:
-        #   "Pedro is CEO of Brex"           -> gbrain (person page)
-        #   "Brex raised Series D at $12B"   -> gbrain (company page)
+        #   "Alice is CEO of Acme"           -> gbrain (person page)
+        #   "Acme raised Series D at $12B"   -> gbrain (company page)
         #   "Tuesday's meeting covered Q2"   -> gbrain (meeting page)
-        #   "The meatsuit maintenance tax"   -> gbrain (originals page)
+        #   "The aurora pavilion thesis"     -> gbrain (originals page)
 
     elif info.is_about_operations:
         # AGENT MEMORY: preferences, decisions, tool config, session continuity
@@ -57,15 +57,15 @@ on user_asks(question):
 
 ## Tricky Spots
 
-1. **Don't store people in agent memory.** "Pedro prefers email over Slack" feels like a preference, but it's a fact about Pedro -- it goes in GBrain on Pedro's page. Agent memory is for the agent's own operational state, not facts about people in the world.
+1. **Don't store people in agent memory.** "Alice prefers email over Slack" feels like a preference, but it's a fact about Alice -- it goes in GBrain on Alice's page. Agent memory is for the agent's own operational state, not facts about people in the world.
 2. **Don't store user preferences in GBrain.** "User likes bullet points over paragraphs" is about how the agent should behave, not about the world. It goes in agent memory. GBrain pages are for entities, not for agent configuration.
-3. **Synthesis of external ideas goes in GBrain.** "User's take on Peter Thiel's zero-to-one framework" is the user's original thinking -- it goes in GBrain under originals/, not in agent memory.
+3. **Synthesis of external ideas goes in GBrain.** "User's take on the zero-to-one framework" is the user's original thinking -- it goes in GBrain under originals/, not in agent memory.
 4. **Agent memory doesn't survive agent resets on some platforms.** Critical world knowledge MUST be in GBrain, which is durable. If the agent loses memory, the brain still has everything.
 5. **When in doubt, ask: is this about the world or about how to operate?** World -> GBrain. Operations -> agent memory. Current conversation -> session.
 
 ## How to Verify
 
-1. Ask the agent "Who is Pedro?" -- confirm it runs `gbrain search` or `gbrain get`, not `memory_search`. Person lookup should hit GBrain.
+1. Ask the agent "Who is Alice?" -- confirm it runs `gbrain search` or `gbrain get`, not `memory_search`. Person lookup should hit GBrain.
 2. Ask the agent "How should I format responses?" -- confirm it checks agent memory, not GBrain. Preferences are operational state.
 3. Check that no person or company pages exist in agent memory storage. Run `memory_search "person"` -- it should return preferences, not dossiers.
 4. Check that GBrain doesn't contain pages about agent behavior. Run `gbrain search "user prefers"` -- it should return nothing (preferences belong in agent memory).

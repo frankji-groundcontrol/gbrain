@@ -8,7 +8,7 @@ and a self-wiring knowledge graph, wired into your agent over MCP.
 
 There are two ways to do this. Pick the one that matches where you are:
 
-- **Path A — I already run a brain** (OpenClaw, Hermes, or any `gbrain serve`
+- **Path A — I already run a brain** (your OpenClaw, or any `gbrain serve`
   host) and I want my Claude Code / Codex to reach the same brain. → [jump to Path A](#path-a-connect-an-agent-to-a-brain-you-already-have)
 - **Path B — I have nothing yet.** Spin up a local brain in 2 seconds and wire it
   into my coding agent. → [jump to Path B](#path-b-start-from-nothing-local-brain-local-agent)
@@ -24,7 +24,7 @@ Prerequisite for either path: `bun install -g github:garrytan/gbrain`.
 
 ## Path A: connect an agent to a brain you already have
 
-You already have a populated brain (the OpenClaw / Hermes case: it's on your
+You already have a populated brain (the OpenClaw case: it's on your
 agent host, full of meetings, people, and ideas). You want Claude Code on your
 laptop, and Codex too, to query it. This is the remote path: the host serves
 HTTP, your laptop agents connect with a token.

@@ -64,8 +64,8 @@ on new_meeting_transcript(meeting):
 
 1. **Always pull the COMPLETE transcript, never the AI summary.** AI summaries hallucinate framing -- they editorialize what was "agreed" or "decided" when no such agreement happened. The diarized transcript is ground truth.
 2. **Entity propagation is the step most agents skip.** A meeting is NOT fully ingested until every attendee's page, every mentioned person's page, and every company's page has a new timeline entry. The meeting page alone is useless without propagation.
-3. **Mentioned people are not just attendees.** If the meeting discussed "Sarah's team at Brex," then Sarah's page AND Brex's page need updates -- even though Sarah wasn't in the room.
-4. **The agent's analysis is the value, not a summary.** "They discussed Q2 targets" is worthless. "Pedro pushed back on the burn rate, Diana didn't commit to the timeline, and nobody addressed the pricing gap" is useful.
+3. **Mentioned people are not just attendees.** If the meeting discussed "Charlie's team at Acme," then Charlie's page AND Acme's page need updates -- even though Charlie wasn't in the room.
+4. **The agent's analysis is the value, not a summary.** "They discussed Q2 targets" is worthless. "Alice pushed back on the burn rate, Bob didn't commit to the timeline, and nobody addressed the pricing gap" is useful.
 5. **Back-links must be bidirectional.** The meeting page links to attendee pages AND attendee pages link back to the meeting. The graph is bidirectional. Always.
 
 ## How to Verify

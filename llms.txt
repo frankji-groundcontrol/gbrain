@@ -13,6 +13,7 @@ Repo: https://github.com/garrytan/gbrain
 - [INSTALL_FOR_AGENTS.md](https://raw.githubusercontent.com/garrytan/gbrain/master/INSTALL_FOR_AGENTS.md): 9-step agent installation.
 - [skills/RESOLVER.md](https://raw.githubusercontent.com/garrytan/gbrain/master/skills/RESOLVER.md): Skill dispatcher. Read first for any task.
 - [README.md](https://raw.githubusercontent.com/garrytan/gbrain/master/README.md): Project overview, benchmarks, 30-minute setup.
+- [docs/README.md](https://raw.githubusercontent.com/garrytan/gbrain/master/docs/README.md): The documentation map: every doc in the tree, one line each, with the record-system folders (plans, learning, practices, issues) and staleness annotations.
 
 ## Configuration
 
@@ -21,6 +22,9 @@ Repo: https://github.com/garrytan/gbrain
 - [docs/what-schemas-unlock.md](https://raw.githubusercontent.com/garrytan/gbrain/master/docs/what-schemas-unlock.md): Why schemas matter: 7 killer use cases (4000 invisible meetings, founder ops brain, research brain, legal brain, team brain, agent-as-co-curator) + the structural argument for typed page kinds. Read this before pitching schema authoring (v0.40.7.0).
 - [docs/schema-author-tutorial.md](https://raw.githubusercontent.com/garrytan/gbrain/master/docs/schema-author-tutorial.md): 5-minute walkthrough: fork the bundled pack, add a custom `researcher` type, backfill existing pages via `gbrain schema sync --apply`, prove the T1.5 wiring via `gbrain whoknows` (v0.40.7.0).
 - [docs/guides/live-sync.md](https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/live-sync.md): Incremental markdown sync setup.
+- [docs/operations/search-modes.md](https://raw.githubusercontent.com/garrytan/gbrain/master/docs/operations/search-modes.md): The named search mode bundles (conservative / balanced / tokenmax): knob tables, the cost matrix, resolution chain, cache-key hygiene, CLI surfaces.
+- [docs/operations/pace-mode.md](https://raw.githubusercontent.com/garrytan/gbrain/master/docs/operations/pace-mode.md): DB-contention-aware backfill pacing for embed/sync: mode bundles, env-above-config resolution, surfaces, coupled correctness fixes.
+- [docs/operations/sync-tuning.md](https://raw.githubusercontent.com/garrytan/gbrain/master/docs/operations/sync-tuning.md): Sync resumability + per-source lock tuning: the six GBRAIN_SYNC_* / GBRAIN_LOCK_* incident-time env knobs.
 - [docs/guides/cron-schedule.md](https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/cron-schedule.md): Recurring job scheduling.
 - [docs/guides/minions-deployment.md](https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/minions-deployment.md): Deploying the gbrain jobs worker: crontab + watchdog, inline --follow, systemd/Procfile/fly.toml, upgrade checklist.
 - [docs/guides/quiet-hours.md](https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/quiet-hours.md): Notification hold + timezone-aware delivery.

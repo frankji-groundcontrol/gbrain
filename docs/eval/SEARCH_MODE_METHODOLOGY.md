@@ -28,7 +28,7 @@ No private brain content is used in any reported result. The committed NDJSON du
 - **Random seed:** `42` throughout. Set via `--seed N` on `gbrain eval run-all`; recorded in every per-run record.
 - **No per-question curation.** Splits are taken whole; no question is filtered for reporting.
 - **No mode-specific tuning.** The same dataset + same seed feeds every mode. The mode is the only independent variable.
-- **Stability across re-runs:** with `--seed 42` and the same dataset SHA, two runs of the same (mode, suite) produce identical retrieval orderings (modulo the optional Haiku expansion call, which is non-deterministic). Persisted in `eval_results` so anyone can re-score from the committed dumps.
+- **Stability across re-runs:** with `--seed 42` and the same dataset SHA, two runs of the same (mode, suite) produce identical retrieval orderings (modulo the optional Haiku expansion call, which is non-deterministic). Persisted in `<repo>/.gbrain-evals/eval-results.jsonl` so anyone can re-score from the per-run records.
 
 ## 4. Run procedure
 
@@ -45,15 +45,15 @@ gbrain eval run-all \
   --seed 42 \
   --limit 500 \
   --budget-usd-retrieval 5 \
-  --budget-usd-answer 20 \
-  --output docs/eval/results/v0.32.3/
+  --budget-usd-answer 20
 
+# Per-run records land at <repo>/.gbrain-evals/eval-results.jsonl.
 # Render the comparison.
-gbrain eval compare --md > docs/eval/results/v0.32.3/README.md
-gbrain eval compare --json > docs/eval/results/v0.32.3/comparison.json
+gbrain eval compare --md > .gbrain-evals/comparison.md
+gbrain eval compare --json > .gbrain-evals/comparison.json
 ```
 
-The orchestrator writes per-run records to `<repo>/.gbrain-evals/eval-results.jsonl`. Every record carries: `run_id`, `ran_at`, `suite`, `mode`, `commit`, `seed`, `limit`, `params`, `status`, `duration_ms`. The dumps under `docs/eval/results/v0.32.3/` carry the raw question-level outputs so a reviewer can re-score with their own metric implementation.
+The orchestrator writes per-run records to `<repo>/.gbrain-evals/eval-results.jsonl`. Every record carries: `run_id`, `ran_at`, `suite`, `mode`, `commit`, `seed`, `limit`, `params`, `status`, `duration_ms`. Those records (under `<repo>/.gbrain-evals/`, not committed to the docs tree) carry the raw question-level outputs so a reviewer can re-score with their own metric implementation.
 
 ## 5. Threats to validity
 
@@ -68,14 +68,14 @@ Honest list. We name what would let a critic dismiss the numbers.
 
 ## 6. Per-question raw outputs
 
-Every reported metric is reproducible from the NDJSON dumps committed at `docs/eval/results/v0.32.3/`. The commit SHA in the methodology footer pins the code version.
+Every reported metric is reproducible from the per-run records at `<repo>/.gbrain-evals/eval-results.jsonl` (not committed to the docs tree). The commit SHA in the methodology footer pins the code version.
 
-**Examples per mode:** the auto-generated `README.md` next to the dumps includes both winning and losing examples per mode, chosen by the deterministic rule:
+**Examples per mode:** the auto-generated comparison report (`gbrain eval compare --md`) includes both winning and losing examples per mode, chosen by the deterministic rule:
 
 - **Wins:** the 3 questions where this mode's score exceeded the next-best mode by the largest margin.
 - **Losses:** the 3 questions where this mode's score fell short of the next-best mode by the largest margin.
 
-Picked by the score delta, NOT cherry-picked by hand. The README documents the rule so a critic can verify.
+Picked by the score delta, NOT cherry-picked by hand. The report documents the rule so a critic can verify.
 
 ## 7. Pre-registered expectations
 

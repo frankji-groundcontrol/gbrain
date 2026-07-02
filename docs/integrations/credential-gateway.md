@@ -1,10 +1,10 @@
-# Credential Gateway (ClawVisor / Hermes)
+# Credential Gateway (ClawVisor / your OpenClaw)
 
 
 Three integrations that make the agent real. Without these, the brain is a static
 database. With them, it's alive.
 
-### 14a. Credential Gateway (ClawVisor / Hermes Gateway)
+### 14a. Credential Gateway (ClawVisor / your OpenClaw's gateway)
 
 The EA workflow needs Gmail, Calendar, Contacts, and messaging access. The agent
 should never hold API keys directly. Use a credential gateway that enforces policies
@@ -40,11 +40,11 @@ tracking threads" works. "Email triage" gets rejected. The intent verification m
 uses the purpose to judge whether each request is consistent -- if your purpose is
 narrow, legitimate requests fail verification.
 
-**Hermes Agent: Built-in gateway.** Hermes has multi-platform messaging (Telegram,
+**Your OpenClaw: Built-in gateway.** Your OpenClaw has multi-platform messaging (Telegram,
 Discord, Slack, WhatsApp, Signal, Email) and tool access built into its gateway. Use
 `config.yaml` to configure API credentials. The gateway daemon manages connections
 and routes webhooks to agent sessions. For Google services, configure OAuth credentials
-in the gateway config. Hermes's scheduled automations can run the same EA workflows
+in the gateway config. Your OpenClaw's scheduled automations can run the same EA workflows
 (email triage, calendar prep, contact enrichment) through the gateway's tool system.
 
 ---

@@ -10,19 +10,19 @@ but wrong on several mechanics; this is the corrected record + what shipped.
 
 ## 1. What happened
 
-The agent was asked to log that Garry "wants to build a Greek amphitheater." It
+The agent was asked to log that the user "wants to build a garden amphitheater." It
 ran a retrieval for the concept, the canonical concept page (titled "...Indoor
-Greek Amphitheater...") did **not** surface with enough confidence to be
+Garden Amphitheater...") did **not** surface with enough confidence to be
 recognized as the existing page, and the agent wrote a **duplicate stub** on top
-of a fully-developed concept doc. Garry caught it: "It's in the brain. It's the
-Hall of Light. Why did you forget?"
+of a fully-developed concept doc. The user caught it: "It's in the brain. It's the
+Hall of Dawn. Why did you forget?"
 
-The page is *about* a Greek amphitheater — the phrase is in its title and first
+The page is *about* a garden amphitheater — the phrase is in its title and first
 sentence. A healthy index returns it at the top. It didn't.
 
 ## 2. The disease (the RFC got this right)
 
-The brain is stored by **meaning and chosen name** (Mingtang, Hall of Light) but
+The brain is stored by **meaning and chosen name** (Aurora Pavilion, Hall of Dawn) but
 was retrieved by **literal embedding proximity to a body chunk**, and the agent's
 "is this already here?" decision keyed off a single fuzzy blended score. Three
 retrieval gaps plus one contract gap produced the miss.
@@ -53,7 +53,7 @@ These were checked in code during the fix; several change the remedy:
 |---|---|---|
 | **Per-page max-pool** (T1) | a page scored by its weakest chunk; vector page-recall | `searchVector` both engines, shared `buildBestPerPagePoolCte` |
 | **Title-phrase boost** (T2) | query is a phrase in the title but matched a body chunk | `applyTitleBoost` (reads `page.title`), `title_boost` mode knob |
-| **Alias hop** (T3) | true synonyms with zero surface overlap ("Hall of Light" → Mingtang) | `page_aliases` table, `applyAliasHop`, ingest projection + `reindex --aliases` backfill |
+| **Alias hop** (T3) | true synonyms with zero surface overlap ("Hall of Dawn" → Aurora Pavilion) | `page_aliases` table, `applyAliasHop`, ingest projection + `reindex --aliases` backfill |
 | **Evidence contract** (T4) | the agent keyed "don't duplicate" off a fuzzy score | `evidence` + `create_safety` on every result; the agent keys off `create_safety='exists'`, not a threshold |
 
 Plus: `gbrain search "<text>"` is now cheap-hybrid (the obvious verb gives the
@@ -65,7 +65,7 @@ that hard-gates the families that ARE this incident.
 
 ```
 # Which layer surfaces (or misses) the target page?
-gbrain search diagnose "Greek amphitheater" --target projects/new-greek-theater/concept_v0
+gbrain search diagnose "garden amphitheater" --target projects/aurora-pavilion/concept_v0
 
 # Backfill aliases for existing pages whose frontmatter predates the alias layer:
 gbrain reindex --aliases
@@ -81,10 +81,10 @@ For a page to be reliably found by its chosen name, give it `aliases:` frontmatt
 
 ```yaml
 ---
-title: The Mingtang — Indoor Greek Amphitheater
+title: The Aurora Pavilion — Indoor Garden Amphitheater
 aliases:
-  - Hall of Light
-  - 明堂
+  - Hall of Dawn
+  - 曙光阁
 ---
 ```
 

@@ -175,10 +175,11 @@ router exposes the spec-compliant discovery endpoint at
 
 ### 4. Scopes and localOnly
 
-Every operation is tagged `read | write | admin`. Four operations are
-`localOnly` and rejected over HTTP regardless of scope: `sync_brain`,
-`file_upload`, `file_list`, `file_url`. Remote agents cannot reach local
-filesystem surface area.
+Every operation is tagged `read | write | admin`. Operations marked
+`localOnly` in `src/core/operations.ts` are rejected over HTTP regardless of
+scope — e.g. `sync_brain`, `file_upload`, `file_list`, `file_url`,
+`get_recent_transcripts`. Remote agents cannot reach local filesystem
+surface area.
 
 | Scope | What it allows |
 |-------|---------------|
@@ -236,8 +237,13 @@ gbrain auth test \
 
 ## Operations
 
-All 30 GBrain operations are available remotely, including `sync_brain` and
-`file_upload` (no timeout limits with self-hosted server).
+`src/core/operations.ts` defines ~90 operations — the single contract the CLI
+and MCP server are both generated from. Every operation carries a scope
+(`read | write | admin`), enforced by the HTTP server before the handler runs.
+Operations marked `localOnly` (e.g. `sync_brain`, `file_upload`, `file_url`)
+are rejected over HTTP regardless of scope and are only available to the
+local CLI. Everything else is available remotely (no timeout limits with a
+self-hosted server).
 
 **Security note on `file_upload`:** remote MCP callers are confined to the working
 directory where `gbrain serve` was launched. Symlinks, `..` traversal, and absolute

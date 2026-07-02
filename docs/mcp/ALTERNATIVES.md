@@ -58,7 +58,7 @@ Both run Bun natively. No bundling, no Deno, no cold start, no timeout limits.
 | Works when laptop is off | No | No | Yes |
 | Cold start | None | None | None |
 | Timeout limits | None | None | None |
-| All 30 operations | Yes | Yes | Yes |
+| ~90 operations (localOnly ops excluded over HTTP) | Yes | Yes | Yes |
 | Setup time | 5 min | 10 min | 15 min |
 
 **Note:** `gbrain serve --http` is the built-in HTTP transport (v0.22.7+). Bearer auth

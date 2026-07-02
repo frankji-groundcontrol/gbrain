@@ -51,8 +51,8 @@ The brain has context no external API can provide:
 - Timeline (what changed recently, what's trending)
 
 A LinkedIn scrape gives you their job title. The brain gives you: "co-founded
-Brex, you had coffee with him 3 times, last discussed the payments infrastructure
-thesis, he's interested in your take on AI agents."
+Acme, you had coffee with her 3 times, last discussed the payments infrastructure
+thesis, she's interested in your take on AI agents."
 
 ## Tricky Spots
 
@@ -62,7 +62,7 @@ thesis, he's interested in your take on AI agents."
 
 2. **Fuzzy slug matching.** `gbrain get` supports fuzzy matching. If the exact
    slug doesn't exist, it suggests alternatives. Use this for name variants
-   ("Pedro" → "pedro-franceschi").
+   ("Alice" → "alice-chen").
 
 3. **Don't skip for "simple" questions.** Even "what's Acme Corp's address?"
    should check the brain first. The brain might have it, and the lookup adds

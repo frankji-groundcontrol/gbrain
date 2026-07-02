@@ -21,7 +21,7 @@ assessment that's always current.
 ```markdown
 ---
 type: person
-title: Sarah Chen
+title: Charlie Wu
 tags: [engineering, acme-corp]
 ---
 
@@ -44,10 +44,10 @@ Sharp technical leader. Under-appreciated internally. Watch for signs of burnout
 Ascending. Likely CTO track if the migration succeeds.
 
 ## Relationship
-Met through Pedro. Had coffee 3x. Last: discussed API architecture thesis.
+Met through Alice. Had coffee 3x. Last: discussed API architecture thesis.
 
 ## Contact
-sarah@acmecorp.com | @sarahchen | linkedin.com/in/sarahchen
+charlie@example.com | @charlie_example | linkedin.com/in/charlie-wu-example
 
 ---
 
@@ -57,8 +57,8 @@ sarah@acmecorp.com | @sarahchen | linkedin.com/in/sarahchen
   Seemed energized about GraphQL pivot.
   [Source: Meeting notes, 2026-04-07 2:00 PM PT]
 - **2026-04-03** | Mentioned in email re Q2 planning. Taking lead on ops.
-  [Source: Gmail, sarah@acmecorp.com, 2026-04-03 10:30 AM PT]
-- **2026-03-15** | First meeting. Intro from Pedro. Strong technical background.
+  [Source: Gmail, charlie@example.com, 2026-04-03 10:30 AM PT]
+- **2026-03-15** | First meeting. Intro from Alice. Strong technical background.
   [Source: User, direct conversation, 2026-03-15 3:00 PM PT]
 ```
 
@@ -107,7 +107,7 @@ support that claim.
 
 2. **Timeline entries are immutable.** Never edit a timeline entry. If information
    turns out to be wrong, add a NEW entry correcting it:
-   `- 2026-04-10 | Correction: Sarah is VP Eng, not CTO. Previous entry was wrong.`
+   `- 2026-04-10 | Correction: Charlie is VP Eng, not CTO. Previous entry was wrong.`
 
 3. **GBrain search weights compiled truth higher.** `gbrain query` returns compiled
    truth chunks with higher relevance than timeline chunks. This means the freshest
@@ -125,7 +125,7 @@ support that claim.
 
 1. **Update a person page.** Add new meeting info. Check: compiled truth was
    REWRITTEN (not appended), timeline has new entry at the top.
-2. **Search for the person.** `gbrain query "Sarah Chen"`. The compiled truth
+2. **Search for the person.** `gbrain query "Charlie Wu"`. The compiled truth
    (current synthesis) should appear first, not a random timeline entry.
 3. **Check traceability.** Every claim in compiled truth should have a
    corresponding timeline entry. Read both sections and verify.
