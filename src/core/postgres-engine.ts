@@ -204,6 +204,7 @@ export class PostgresEngine implements BrainEngine {
       // manager so kill-switch state and direct pool are shared.
       this.connectionManager = new ConnectionManager({
         url,
+        directUrl: config.direct_database_url ?? null,
         parent: config.parentConnectionManager,
         readPoolOwnedExternally: true, // we own _sql; manager just routes
       });
@@ -221,6 +222,7 @@ export class PostgresEngine implements BrainEngine {
       if (url) {
         this.connectionManager = new ConnectionManager({
           url,
+          directUrl: config.direct_database_url ?? null,
           parent: config.parentConnectionManager,
           readPoolOwnedExternally: true, // db.ts owns the pool
         });

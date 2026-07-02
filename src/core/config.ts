@@ -49,6 +49,13 @@ export interface GBrainConfig {
    * reliable slot. Process env DASHSCOPE_API_KEY still wins.
    */
   dashscope_api_key?: string;
+  /**
+   * Explicit direct-connection URL for DDL/bulk pools. File-plane twin of
+   * GBRAIN_DIRECT_DATABASE_URL (env wins) so daemon-spawned gbrain
+   * processes on IPv6-hostile networks route "direct" traffic through a
+   * session-mode pooler without needing shell env.
+   */
+  direct_database_url?: string;
   /** AI gateway config (v0.14+). v0.36+ default: "zeroentropyai:zembed-1" / 1280 / "anthropic:claude-haiku-4-5-20251001". */
   embedding_model?: string;
   embedding_dimensions?: number;
@@ -535,6 +542,7 @@ export function loadConfig(): GBrainConfig | null {
     ...(process.env.ANTHROPIC_API_KEY ? { anthropic_api_key: process.env.ANTHROPIC_API_KEY } : {}),
     ...(process.env.ZEROENTROPY_API_KEY ? { zeroentropy_api_key: process.env.ZEROENTROPY_API_KEY } : {}),
     ...(process.env.DASHSCOPE_API_KEY ? { dashscope_api_key: process.env.DASHSCOPE_API_KEY } : {}),
+    ...(process.env.GBRAIN_DIRECT_DATABASE_URL ? { direct_database_url: process.env.GBRAIN_DIRECT_DATABASE_URL } : {}),
     ...(process.env.GBRAIN_EMBEDDING_MODEL ? { embedding_model: process.env.GBRAIN_EMBEDDING_MODEL } : {}),
     ...(process.env.GBRAIN_EMBEDDING_DIMENSIONS ? { embedding_dimensions: parseInt(process.env.GBRAIN_EMBEDDING_DIMENSIONS, 10) } : {}),
     ...(process.env.GBRAIN_EXPANSION_MODEL ? { expansion_model: process.env.GBRAIN_EXPANSION_MODEL } : {}),
@@ -1024,6 +1032,7 @@ export function toEngineConfig(config: GBrainConfig): EngineConfig {
     engine: config.engine,
     database_url: config.database_url,
     database_path: config.database_path,
+    direct_database_url: config.direct_database_url,
   };
 }
 

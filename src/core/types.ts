@@ -1541,6 +1541,13 @@ export interface EngineConfig {
   database_url?: string;
   database_path?: string;
   engine?: 'postgres' | 'pglite';
+  /**
+   * Explicit DDL/bulk ("direct") connection URL. Overrides the derived
+   * db.<ref>.supabase.co:5432 host, which is IPv6-only and black-holes on
+   * some networks. Resolved by loadConfig (env GBRAIN_DIRECT_DATABASE_URL
+   * wins over the config-file value); consumed by ConnectionManager.
+   */
+  direct_database_url?: string;
 }
 
 // Errors
