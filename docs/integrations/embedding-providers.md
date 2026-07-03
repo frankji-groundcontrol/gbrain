@@ -30,7 +30,7 @@ The resolved provider + dimensions get persisted to `~/.gbrain/config.json` atom
 | `google` | `GOOGLE_GENERATIVE_AI_API_KEY` | 768 | 0.025 | no | no |
 | `azure-openai` | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT` | 1536 | 0.13 | no | no |
 | `minimax` | `MINIMAX_API_KEY` | 1536 | 0.07 | no | no |
-| `dashscope` | `DASHSCOPE_API_KEY` | 1024 | varies | no | no |
+| `dashscope` | `DASHSCOPE_API_KEY` | 1024 | 0.07 | no | no |
 | `zhipu` | `ZHIPUAI_API_KEY` | 1024 | varies | no | no |
 | `ollama` | (none — runs locally) | 768 | 0 | yes | no |
 | `llama-server` | (none — runs locally) | user-set | 0 | yes | no |
@@ -138,6 +138,8 @@ Set `DASHSCOPE_API_KEY`. Keys are region-scoped: a China (Beijing) console key o
 Models: `text-embedding-v4` (current; Matryoshka 64-2048 dims — gbrain offers up to 1536 to stay under pgvector's 2000-dim HNSW cap; 10 texts/request, enforced via `max_batch_items`), `text-embedding-v3` (Matryoshka 64-1024), `text-embedding-v2`.
 
 CJK-dominant content tokenizes denser than OpenAI tiktoken; gbrain declares `chars_per_token: 2` so the batch pre-split leaves headroom.
+
+Keys are also workspace-scoped: a key that works for other models can return `Model not exist.` for `text-embedding-v4` if the workspace never enabled it. And semantic search's default 6s query-embed budget is too tight for a cold cross-border round trip, so `gbrain query` silently degrades to keyword-only — raise it with `gbrain config set search.query_embed_timeout_ms 20000`. Full walkthrough (endpoints, workspace domains, key/base-URL planes, and a minimal China config) in [`docs/ai-providers/dashscope.md`](../ai-providers/dashscope.md).
 
 ### Zhipu AI (BigModel)
 

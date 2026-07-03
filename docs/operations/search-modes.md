@@ -23,6 +23,13 @@ by `search.mode_upgrade_notice_shown`.
 | `expansion` (LLM multi-query) | false          | false      | **true**       |
 | `relationalRetrieval`         | false          | **true**   | **true**       |
 | `searchLimit` default         | 10             | 25         | 50             |
+| `query_embed_timeout_ms`      | 6000           | 6000       | 6000           |
+
+`query_embed_timeout_ms` is the one non-cost knob in the bundle — it caps the
+query-time embed before the vector leg falls back to keyword-only, and is
+uniform across modes because it is about reliability, not cost/quality. See
+[Query-embed timeout](#query-embed-timeout) below for why a far provider needs
+to raise it.
 
 ## Cost anchors
 
@@ -102,6 +109,23 @@ seed entity and walks the typed-edge graph
 Within-source, deterministic, mentions-excluded by default, and a pure no-op
 for non-relational queries. The `query` op's `relational` flag forces it on/off
 per call.
+
+## Query-embed timeout
+
+Semantic search embeds the QUERY at call time. When that embed overruns its
+wall-clock budget the vector leg is dropped and the query silently falls back
+to keyword-only, so a slow or far embedding provider reads as "no semantic
+results" rather than an error. All three modes default the budget to 6000ms
+(`query_embed_timeout_ms` in the bundle). The config key and the env var both
+override the bundle default; env wins:
+
+    gbrain config set search.query_embed_timeout_ms 20000   # DB-plane search key
+    GBRAIN_QUERY_EMBED_TIMEOUT_MS=20000 gbrain query "..."   # env escape hatch (wins)
+
+A CLI process embedding against a far provider (e.g. DashScope Beijing from a
+cold process) routinely needs 20000; see
+[docs/ai-providers/dashscope.md](../ai-providers/dashscope.md) for the
+region-specific symptom this fixes.
 
 ## CLI surfaces
 

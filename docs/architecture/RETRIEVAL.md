@@ -145,6 +145,8 @@ results
 
 Each stage is testable in isolation. Each stage is replaceable. The whole pipeline is < 1ms of orchestration cost; the latency budget goes to the upstream HTTP calls (embedding, rerank) and the index scans.
 
+The query-time embed sits on the critical path before the vector arm can run, so it is bounded by a wall-clock deadline (`search.query_embed_timeout_ms`, default 6000ms). If that budget elapses — common when the embedding provider is far from the caller (e.g. DashScope Beijing from a cold CLI process) — the vector arm is dropped and `query` degrades to keyword-only instead of blocking. Tuning lives in [docs/operations/search-modes.md](../operations/search-modes.md).
+
 ## How to verify on your own brain
 
 ```bash

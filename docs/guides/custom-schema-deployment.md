@@ -6,6 +6,11 @@ tenants — that is both messy and a wider attack surface (Supabase exposes
 `public` through PostgREST by default). A dedicated schema keeps the brain
 self-contained and invisible to the REST API.
 
+> "Schema" here means a **Postgres schema** (the SQL namespace tables live in),
+> not the knowledge-base directory structure in `GBRAIN_RECOMMENDED_SCHEMA.md`
+> or the schema packs in `docs/architecture/schema-packs.md`. Those are
+> unrelated concepts that happen to share the word.
+
 ## How it works
 
 gbrain uses postgres.js, which forwards unknown connection-URL query

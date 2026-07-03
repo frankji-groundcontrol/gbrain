@@ -144,6 +144,17 @@ RRF fusion, multi-query expansion, and 4-layer dedup are engine-agnostic. They o
 - JSONB for frontmatter with GIN index
 - Connection pooling via Supabase Supavisor (port 6543)
 
+**Connection URL options.** The Postgres engine reads its connection from
+`database_url` (a Supavisor pooler URL). Two optional deployment settings ride
+alongside it. A `?search_path=<schema>,extensions,public` suffix runs the whole
+brain inside a dedicated Postgres schema — useful when it co-tenants a shared
+database with an app or other brains. And `direct_database_url` (env
+`GBRAIN_DIRECT_DATABASE_URL`, or the `direct_database_url` config field)
+overrides the DDL/bulk "direct" pool, whose derived
+`db.<project-ref>.supabase.co:5432` host is IPv6-only and can black-hole
+`initSchema` on IPv6-hostile networks. Both are covered in
+[Running the brain in a custom Postgres schema](guides/custom-schema-deployment.md).
+
 **Hosting:** Supabase Pro ($25/mo). Zero-ops. Managed Postgres with pgvector built in.
 
 **Why not self-hosted for v0:** The brain should be infrastructure agents use, not something you maintain. Self-hosted Postgres with Docker is a welcome community PR, but v0 optimizes for zero ops.

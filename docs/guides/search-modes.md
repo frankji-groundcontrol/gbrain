@@ -65,6 +65,7 @@ on user_asks_about(topic):
 3. **Don't use hybrid search for known names.** `gbrain query "Alice Chen"` wastes embedding compute. Use `gbrain search "Alice Chen"` or better yet `gbrain get alice-chen` if you know the slug.
 4. **Token budget awareness.** A full page via `gbrain get` can be large. Read the search chunks first to confirm relevance before pulling the full page. "Did anyone mention the Series A?" -- search results (chunks) are probably enough. "Tell me everything about Alice" -- get the full page.
 5. **Hybrid search needs embeddings to have been run.** If `gbrain query` returns nothing but `gbrain search` finds results, the embeddings haven't been generated yet. Run the embedding pipeline first.
+6. **A far embedding provider can silently turn `gbrain query` into keyword-only search.** The query-time embed has a wall-clock budget (`search.query_embed_timeout_ms`, default 6000ms). If the embedding provider is far from the caller (e.g. DashScope Beijing from a cold CLI process) and the embed doesn't finish in time, the vector leg is dropped and `gbrain query` falls back to keyword-only -- so a purely-semantic question can come back empty or look like plain keyword results even though embeddings exist. This is distinct from #5, where no embeddings were ever run. Fix: raise the budget with `gbrain config set search.query_embed_timeout_ms 20000`, or export `GBRAIN_QUERY_EMBED_TIMEOUT_MS`.
 
 ## How to Verify
 

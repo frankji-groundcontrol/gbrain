@@ -1,8 +1,9 @@
 # RLS and you
 
-Short version: every table in your gbrain's `public` schema needs Row Level
-Security enabled. If one doesn't, `gbrain doctor` now fails, not warns, and the
-process exits 1.
+Short version: every table in your gbrain's schema (the `public` schema by
+default, or a custom schema if you pin one — see the last section) needs Row
+Level Security enabled. If one doesn't, `gbrain doctor` now fails, not warns, and
+the process exits 1.
 
 This guide explains why, what to do when you hit the check, and the escape hatch
 for the cases where you really do want a table to stay readable by the anon key.
@@ -231,3 +232,26 @@ doesn't apply. But gbrain still fails the check on missing RLS, because:
 
 If this framing doesn't fit your deployment, file an issue with the specifics
 so we can decide whether a self-hosted-exempt mode is justified.
+
+## Custom (non-public) schema
+
+If you run the brain in a dedicated Postgres schema — a
+`?search_path=gbrain,extensions,public` suffix on the connection URL (see
+[custom-schema-deployment.md](custom-schema-deployment.md)) — the RLS picture
+shifts in two ways:
+
+- **doctor still enforces it.** The `rls` check keys off `current_schema()`,
+  not a hardcoded `public`, so it requires RLS on the tables in your custom
+  schema exactly as it does in `public`. gbrain enables RLS on its own tables
+  through unqualified `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` statements
+  that resolve through your search_path, so a fresh install gets RLS on
+  gbrain's own tables.
+- **the auto-RLS event trigger is public-only.** The
+  `auto_rls_on_create_table` event trigger and the one-time backfill
+  (migration v35) both filter on `public.*` and do NOT run in a custom schema.
+  They exist to close the PostgREST-exposure gap on `public`, and a custom
+  schema is not exposed by PostgREST by default — so there is nothing for them
+  to guard. The practical consequence: tables you create by hand in the custom
+  schema won't get RLS turned on automatically the way a hand-created `public`
+  table would. If `gbrain doctor` flags one, run the `ALTER TABLE` it prints
+  (it resolves through your search_path).

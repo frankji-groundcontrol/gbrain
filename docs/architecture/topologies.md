@@ -396,6 +396,10 @@ simultaneously — that's by design.
 
 - `docs/architecture/brains-and-sources.md` — in-brain organization (brains
   vs sources axes).
+- [`docs/guides/custom-schema-deployment.md`](../guides/custom-schema-deployment.md)
+  — running the brain in a dedicated Postgres schema so it can co-tenant a
+  shared database with an app or other brains, plus the direct-pool IPv6
+  workaround for Supabase.
 - `docs/mcp/CLAUDE_DESKTOP.md` and siblings — per-client MCP setup.
 - `gbrain init --help` and `gbrain auth --help` for command-level details.
 - [`docs/tutorials/`](../tutorials/) — end-to-end walkthroughs that combine

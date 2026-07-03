@@ -104,6 +104,7 @@ detail on demand.)
 | search modes / cost knobs | `docs/operations/search-modes.md` (the mode bundles; `docs/guides/search-modes.md` is the which-command-to-use agent guide) |
 | backfill pacing / DB contention | `docs/operations/pace-mode.md` |
 | sync checkpoints / lock tuning | `docs/operations/sync-tuning.md` |
+| custom Postgres schema / `current_schema()` probes / direct-connection URL (Supabase IPv6 host hang) | `docs/guides/custom-schema-deployment.md` |
 | embedding spend gates / cost gate / `spend.posture` / off switches | `docs/operations/spend-controls.md` |
 | push-based context (volunteer/watch/reflex window) | `docs/guides/push-context.md` |
 | schema packs / page types / extraction | `docs/architecture/schema-packs.md`, `type-taxonomy.md`, `lens-packs.md` |

@@ -71,6 +71,7 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 
 - **Configure:** [`docs/ENGINES.md`](./docs/ENGINES.md),
   [`docs/guides/live-sync.md`](./docs/guides/live-sync.md),
+  [`docs/guides/custom-schema-deployment.md`](./docs/guides/custom-schema-deployment.md),
   [`docs/mcp/DEPLOY.md`](./docs/mcp/DEPLOY.md).
 - **Debug:** [`docs/GBRAIN_VERIFY.md`](./docs/GBRAIN_VERIFY.md),
   [`docs/guides/minions-fix.md`](./docs/guides/minions-fix.md), `gbrain doctor --fix`.
@@ -266,6 +267,7 @@ detail on demand.)
 | search modes / cost knobs | `docs/operations/search-modes.md` (the mode bundles; `docs/guides/search-modes.md` is the which-command-to-use agent guide) |
 | backfill pacing / DB contention | `docs/operations/pace-mode.md` |
 | sync checkpoints / lock tuning | `docs/operations/sync-tuning.md` |
+| custom Postgres schema / `current_schema()` probes / direct-connection URL (Supabase IPv6 host hang) | `docs/guides/custom-schema-deployment.md` |
 | embedding spend gates / cost gate / `spend.posture` / off switches | `docs/operations/spend-controls.md` |
 | push-based context (volunteer/watch/reflex window) | `docs/guides/push-context.md` |
 | schema packs / page types / extraction | `docs/architecture/schema-packs.md`, `type-taxonomy.md`, `lens-packs.md` |
@@ -1955,6 +1957,17 @@ RRF fusion, multi-query expansion, and 4-layer dedup are engine-agnostic. They o
 - Trigger-based search_vector (spans pages + timeline_entries)
 - JSONB for frontmatter with GIN index
 - Connection pooling via Supabase Supavisor (port 6543)
+
+**Connection URL options.** The Postgres engine reads its connection from
+`database_url` (a Supavisor pooler URL). Two optional deployment settings ride
+alongside it. A `?search_path=<schema>,extensions,public` suffix runs the whole
+brain inside a dedicated Postgres schema — useful when it co-tenants a shared
+database with an app or other brains. And `direct_database_url` (env
+`GBRAIN_DIRECT_DATABASE_URL`, or the `direct_database_url` config field)
+overrides the DDL/bulk "direct" pool, whose derived
+`db.<project-ref>.supabase.co:5432` host is IPv6-only and can black-hole
+`initSchema` on IPv6-hostile networks. Both are covered in
+[Running the brain in a custom Postgres schema](guides/custom-schema-deployment.md).
 
 **Hosting:** Supabase Pro ($25/mo). Zero-ops. Managed Postgres with pgvector built in.
 

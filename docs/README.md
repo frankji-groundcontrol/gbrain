@@ -185,7 +185,10 @@ are added, not rewritten.
   knowledge runtime, v0.38 schema packs, skillpack registry). Current truth
   lives in `architecture/` and `guides/`;
   [designs/COMMUNITY_IDEAS.md](designs/COMMUNITY_IDEAS.md) is the one living
-  ledger (community-PR-wave ideas).
+  ledger (community-PR-wave ideas), and
+  [designs/franky-sharing-layer/](designs/franky-sharing-layer/README.md) is a
+  dated deployment-side design record (a multi-user read/share SQL layer over a
+  Supabase-hosted brain, not gbrain-core).
 - [migrations/](migrations/v0.41.2-markdown-greenfield.md) — version-pinned
   migration runbooks (historical by design).
 - [v0.38-smoke-test-report.md](v0.38-smoke-test-report.md) *(dated report)* —

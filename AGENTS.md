@@ -58,6 +58,7 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
 
 - **Configure:** [`docs/ENGINES.md`](./docs/ENGINES.md),
   [`docs/guides/live-sync.md`](./docs/guides/live-sync.md),
+  [`docs/guides/custom-schema-deployment.md`](./docs/guides/custom-schema-deployment.md),
   [`docs/mcp/DEPLOY.md`](./docs/mcp/DEPLOY.md).
 - **Debug:** [`docs/GBRAIN_VERIFY.md`](./docs/GBRAIN_VERIFY.md),
   [`docs/guides/minions-fix.md`](./docs/guides/minions-fix.md), `gbrain doctor --fix`.
