@@ -1,7 +1,7 @@
 # franky sharing layer (dated design record, 2026-07-03)
 
 Multi-user read/share access to the franky Supabase brain (`gbrain` schema on
-project `hgyjvkuloaouxwdgromz`), designed and deployed 2026-07-03. This is a
+project `<project-ref>`), designed and deployed 2026-07-03. This is a
 **deployment-side** layer: pure SQL on top of the engine's tables, no gbrain
 source changes. The CLI/skills that consume it come later.
 
