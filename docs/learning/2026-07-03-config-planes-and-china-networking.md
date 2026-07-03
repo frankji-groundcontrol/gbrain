@@ -59,7 +59,27 @@ telemetry, wrap the write in `EXCEPTION WHEN read_only_sql_transaction`.
 Corollary: SQL-session tests are not enough; smoke the actual PostgREST
 surface.
 
-## 6. Don't build redaction from secret values
+## 6. The query-embed deadline masquerades as broken embeddings
+
+Even with embeddings 100% present and correct, `gbrain query` returned "No
+results" for paraphrase and CJK queries while exact-keyword queries worked.
+Cause: search embeds the QUERY at call time under a 6s deadline (built for
+stalled providers), and a cold DashScope Beijing round trip exceeds it — the
+vector leg silently falls back to keyword. Now configurable:
+`search.query_embed_timeout_ms` (20000 for China). Diagnostic that cracked
+it: embed the query with curl, run the cosine SQL by hand — data layer
+perfect, so the bug had to be client-side between them.
+
+## 7. Chunk `model` labels are stamped at chunking, not embedding
+
+All 3,428 chunks carried `model='zeroentropyai:zembed-1'` (the gateway
+default) while holding genuine DashScope v4 1536-dim vectors — the label is
+written at chunk-creation time, before any embed call. Harmless to search
+and to `embed --stale` (staleness is `embedding IS NULL`), but lies to
+humans and future migration tooling. One-line correction after the fact:
+`UPDATE content_chunks SET model='<real model>' WHERE embedding IS NOT NULL`.
+
+## 8. Don't build redaction from secret values
 
 Piping process output through `sed "s/$SECRET/***/"` breaks when the secret
 contains `/` — and the sed *error message* then leaks a prefix of the secret

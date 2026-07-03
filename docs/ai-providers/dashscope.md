@@ -76,6 +76,12 @@ All paths are `/compatible-mode/v1` for the OpenAI-compatible surface.
 - **Config**: `gbrain init --embedding-model dashscope:text-embedding-v4
   --embedding-dimensions 1536` (embedding_model/dimensions size the schema,
   so they are init-time choices, not `config set` flips).
+- **Query-time deadline**: semantic search embeds the QUERY per call, and the
+  default 6s budget is too tight for a cold cross-border round trip — every
+  `gbrain query` silently degrades to keyword-only ("No results" for
+  paraphrase/CJK queries while exact keywords work). Set
+  `gbrain config set search.query_embed_timeout_ms 20000` (this one IS a
+  DB-plane search key, unlike the provider keys above).
 
 ## Minimal working China config
 
