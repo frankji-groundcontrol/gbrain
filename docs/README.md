@@ -175,6 +175,9 @@ are added, not rewritten.
   operational methods.
 - [issues/](issues/README.md) — concrete implementation-issue records and
   improvement backlogs.
+- [updates/](updates/README.md) — one file per shipped, user-facing change; the
+  modular per-change home that feeds the version-stamped `CHANGELOG.md` at
+  release time.
 - [incidents/](incidents/2026-05-20-lsd-cost-explosion.md) — post-mortems
   (currently one: the lsd/brainstorm cost-overrun incident).
 - [proposals/](proposals/temporal-contradiction-probe.md) — RFCs (currently
