@@ -68,6 +68,7 @@ describe('SEARCH_MODES + MODE_BUNDLES canonical shape', () => {
       reranker_top_n_in: 30,
       reranker_top_n_out: null,
       reranker_timeout_ms: 5000,
+      query_embed_timeout_ms: 6000,
       floor_ratio: undefined,
       title_boost: 1.25,
       ...CROSS_MODAL_DEFAULTS,
@@ -100,6 +101,7 @@ describe('SEARCH_MODES + MODE_BUNDLES canonical shape', () => {
       reranker_top_n_in: 25,
       reranker_top_n_out: null,
       reranker_timeout_ms: 5000,
+      query_embed_timeout_ms: 6000,
       floor_ratio: undefined,
       title_boost: 1.25,
       ...CROSS_MODAL_DEFAULTS,
@@ -130,6 +132,7 @@ describe('SEARCH_MODES + MODE_BUNDLES canonical shape', () => {
       reranker_top_n_in: 50,
       reranker_top_n_out: null,
       reranker_timeout_ms: 5000,
+      query_embed_timeout_ms: 6000,
       floor_ratio: undefined,
       title_boost: 1.25,
       ...CROSS_MODAL_DEFAULTS,
@@ -675,5 +678,46 @@ describe('v0.43 — relational recall knobs', () => {
     const on = knobsHash(resolveSearchMode({ mode: 'balanced' })); // relational true
     const off = knobsHash(resolveSearchMode({ mode: 'balanced', perCall: { relationalRetrieval: false } }));
     expect(on).not.toBe(off);
+  });
+});
+
+describe('query_embed_timeout_ms — configurable query-embed deadline (China-latency wave)', () => {
+  // The v0.42.20.0 6s query-embed deadline is correct for a stalled provider
+  // but too tight for healthy-but-far providers: a cold DashScope Beijing
+  // round trip from a fresh CLI process exceeds 6s, so EVERY semantic query
+  // silently degraded to keyword-only (the user-visible symptom is "No
+  // results" for paraphrase/CJK queries while exact-keyword queries work).
+  // The deadline is now a mode knob: env > per-call > config key
+  // `search.query_embed_timeout_ms` > bundle default (6000).
+
+  test('bundle default is 6000ms in every mode', () => {
+    for (const mode of ['conservative', 'balanced', 'tokenmax'] as const) {
+      const r = resolveSearchMode({ mode });
+      expect(r.query_embed_timeout_ms).toBe(6_000);
+    }
+  });
+
+  test('config key parses through loadOverridesFromConfig', () => {
+    const ov = loadOverridesFromConfig({ 'search.query_embed_timeout_ms': '20000' });
+    expect(ov.query_embed_timeout_ms).toBe(20_000);
+  });
+
+  test('malformed / non-positive config values fall through to bundle', () => {
+    for (const bad of ['abc', '0', '-5', '']) {
+      const ov = loadOverridesFromConfig({ 'search.query_embed_timeout_ms': bad });
+      expect(ov.query_embed_timeout_ms).toBeUndefined();
+    }
+  });
+
+  test('config override beats bundle default', () => {
+    const r = resolveSearchMode({
+      mode: 'conservative',
+      overrides: { query_embed_timeout_ms: 20_000 },
+    });
+    expect(r.query_embed_timeout_ms).toBe(20_000);
+  });
+
+  test('key is registered so loadSearchModeConfig reads it from the config table', () => {
+    expect(SEARCH_MODE_CONFIG_KEYS).toContain('search.query_embed_timeout_ms');
   });
 });

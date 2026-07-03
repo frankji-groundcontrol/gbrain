@@ -121,6 +121,14 @@ export interface ModeBundle {
   reranker_top_n_out: number | null;
   /** HTTP timeout in ms (default 5000). Threaded into gateway.rerank. */
   reranker_timeout_ms: number;
+  /**
+   * Wall-clock budget for embedding the QUERY at search time before the
+   * vector leg falls back to keyword-only. 6s suits nearby providers; far
+   * providers (e.g. DashScope Beijing from a cold CLI process) need more —
+   * override via `search.query_embed_timeout_ms` (config table) or the
+   * GBRAIN_QUERY_EMBED_TIMEOUT_MS env var (env wins).
+   */
+  query_embed_timeout_ms: number;
 
   /**
    * v0.35.6.0 — floor-ratio gate for metadata-axis boost stages (backlink,
@@ -298,6 +306,7 @@ export const MODE_BUNDLES: Readonly<Record<SearchMode, Readonly<ModeBundle>>> = 
     reranker_top_n_in: 30,
     reranker_top_n_out: null,
     reranker_timeout_ms: 5000,
+    query_embed_timeout_ms: 6000,
     // v0.35.6.0 — undefined for all three bundles; the per-corpus ablation
     // (TODOS.md) gates any default flip.
     floor_ratio: undefined,
@@ -352,6 +361,7 @@ export const MODE_BUNDLES: Readonly<Record<SearchMode, Readonly<ModeBundle>>> = 
     reranker_top_n_in: 25,
     reranker_top_n_out: null,
     reranker_timeout_ms: 5000,
+    query_embed_timeout_ms: 6000,
     // v0.35.6.0 — undefined for all three bundles; the per-corpus ablation
     // (TODOS.md) gates any default flip.
     floor_ratio: undefined,
@@ -407,6 +417,7 @@ export const MODE_BUNDLES: Readonly<Record<SearchMode, Readonly<ModeBundle>>> = 
     reranker_top_n_in: 50,
     reranker_top_n_out: null,
     reranker_timeout_ms: 5000,
+    query_embed_timeout_ms: 6000,
     // v0.35.6.0 — undefined for all three bundles; the per-corpus ablation
     // (TODOS.md) gates any default flip.
     floor_ratio: undefined,
@@ -466,6 +477,7 @@ export interface SearchKeyOverrides {
   // number | undefined.
   reranker_top_n_out?: number | null;
   reranker_timeout_ms?: number;
+  query_embed_timeout_ms?: number;
   // v0.35.6.0 — floor-ratio gate override.
   floor_ratio?: number;
   // T2 — title-phrase boost override.
@@ -512,6 +524,7 @@ export interface SearchPerCallOpts {
   reranker_top_n_in?: number;
   reranker_top_n_out?: number | null;
   reranker_timeout_ms?: number;
+  query_embed_timeout_ms?: number;
   // v0.35.6.0 — floor-ratio per-call override.
   floor_ratio?: number;
   // T2 — title-phrase boost per-call override.
@@ -611,6 +624,7 @@ export function resolveSearchMode(input: ResolveSearchModeInput): ResolvedSearch
     reranker_top_n_in: pick('reranker_top_n_in'),
     reranker_top_n_out: pick('reranker_top_n_out'),
     reranker_timeout_ms: pickRerankerTimeoutMs(),
+    query_embed_timeout_ms: pick('query_embed_timeout_ms'),
     // v0.35.6.0 — floor-ratio resolved via the same pick chain.
     floor_ratio: pick('floor_ratio'),
     title_boost: pick('title_boost'),
@@ -949,6 +963,11 @@ export function loadOverridesFromConfig(
     const n = parseInt(rt, 10);
     if (Number.isFinite(n) && n > 0) out.reranker_timeout_ms = n;
   }
+  const qet = get('search.query_embed_timeout_ms');
+  if (qet !== undefined) {
+    const n = parseInt(qet, 10);
+    if (Number.isFinite(n) && n > 0) out.query_embed_timeout_ms = n;
+  }
 
   // v0.35.6.0 — floor-ratio config key. Accepts a number in [0, 1]; values
   // outside that range silently fall through (no override applied). The
@@ -1059,6 +1078,7 @@ export const SEARCH_MODE_CONFIG_KEYS: ReadonlyArray<string> = Object.freeze([
   'search.reranker.top_n_in',
   'search.reranker.top_n_out',
   'search.reranker.timeout_ms',
+  'search.query_embed_timeout_ms',
   // v0.35.6.0 — floor-ratio gate
   'search.floor_ratio',
   'search.title_boost',

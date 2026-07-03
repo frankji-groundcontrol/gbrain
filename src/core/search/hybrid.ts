@@ -731,6 +731,18 @@ const QUERY_EMBED_TIMEOUT_MS = (() => {
  */
 const MIN_QUERY_EMBED_BUDGET_MS = 2_000;
 
+/**
+ * Resolve the effective query-embed budget: env var (operator escape hatch)
+ * wins over the mode-resolved knob (`search.query_embed_timeout_ms` config
+ * key or bundle default). Exported for tests.
+ */
+export function resolveQueryEmbedTimeoutMs(configuredMs?: number): number {
+  const n = Number(process.env.GBRAIN_QUERY_EMBED_TIMEOUT_MS);
+  if (Number.isFinite(n) && n > 0) return n;
+  if (typeof configuredMs === 'number' && configuredMs > 0) return configuredMs;
+  return 6_000;
+}
+
 export interface QueryEmbedDeadline {
   /** Aborts the underlying fetch (clean socket close) when the budget elapses. */
   signal: AbortSignal;
@@ -763,7 +775,7 @@ export async function embedQueryBounded(
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(`query embed deadline ${QUERY_EMBED_TIMEOUT_MS}ms exceeded`)),
+      () => reject(new Error(`query embed deadline exceeded (budget ${remaining}ms)`)),
       remaining,
     );
   });
@@ -1220,7 +1232,7 @@ export async function hybridSearch(
       // threaded from hybridSearchCached (so the cache-lookup embed + this one
       // share one ~6s budget); direct callers get a fresh deadline. On timeout
       // the embed throws → the catch below falls back to keyword-only.
-      const embedDl = opts?._queryEmbedDeadline ?? makeQueryEmbedDeadline();
+      const embedDl = opts?._queryEmbedDeadline ?? makeQueryEmbedDeadline(resolveQueryEmbedTimeoutMs(resolvedMode.query_embed_timeout_ms));
       const embeddings = await Promise.all(queries.map(q => embedQueryBounded(q, embedOpts, embedDl)));
       queryEmbedding = embeddings[0];
       const textLists = await Promise.all(
@@ -1648,7 +1660,7 @@ export async function hybridSearchCached(
   // times out (→ cacheStatus 'disabled', fall through), then the inner embed
   // sees the already-elapsed budget and fails fast → keyword fallback. Worst
   // case ~one timeout (~6s), comfortably under the CLI 10s force-exit.
-  const queryEmbedDl = makeQueryEmbedDeadline();
+  const queryEmbedDl = makeQueryEmbedDeadline(resolveQueryEmbedTimeoutMs(resolvedForCache.query_embed_timeout_ms));
   if (!skipCache) {
     try {
       const { isAvailable } = await import('../ai/gateway.ts');
