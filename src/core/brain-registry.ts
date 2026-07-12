@@ -28,7 +28,7 @@ import { homedir } from 'os';
 import type { BrainEngine } from './engine.ts';
 import type { EngineConfig } from './types.ts';
 import { GBrainError } from './types.ts';
-import { loadConfig, type GBrainConfig } from './config.ts';
+import { loadConfig, toEngineConfig, type GBrainConfig } from './config.ts';
 
 /** Host brain id. Reserved — users cannot create a mount with this id. */
 export const HOST_BRAIN_ID = 'host';
@@ -403,11 +403,7 @@ export class BrainRegistry {
       );
     }
     const { createEngine } = await import('./engine-factory.ts');
-    const engineConfig: EngineConfig = {
-      engine: config.engine,
-      database_url: config.database_url,
-      database_path: config.database_path,
-    };
+    const engineConfig = toEngineConfig(config);
     const engine = await createEngine(engineConfig);
     await engine.connect(engineConfig);
     return { id: HOST_BRAIN_ID, engine, config, path: null };

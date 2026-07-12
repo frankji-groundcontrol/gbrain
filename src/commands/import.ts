@@ -310,19 +310,20 @@ export async function runImport(
       // constrained poolers (e.g. Supabase port 6543) can cap below this via
       // GBRAIN_POOL_SIZE=1.
       const workerPoolSize = Math.min(2, resolvePoolSize(2));
-      const databaseUrl = config.database_url;
+        const { toEngineConfig } = await import('../core/config.ts');
+        const baseEngineConfig = toEngineConfig(config);
 
-      // v0.22.13 (PR #490 A2): connect workers serially so a partial failure
-      // leaves us with the connected ones already pushed onto workerEngines
-      // for the finally-block cleanup. The prior Promise.all could leak any
-      // engine that connected before another's connect() rejected.
-      const workerEngines: InstanceType<typeof PostgresEngine>[] = [];
-      try {
-        for (let i = 0; i < actualWorkers; i++) {
-          const eng = new PostgresEngine();
-          await eng.connect({ database_url: databaseUrl, poolSize: workerPoolSize });
-          workerEngines.push(eng);
-        }
+        // v0.22.13 (PR #490 A2): connect workers serially so a partial failure
+        // leaves us with the connected ones already pushed onto workerEngines
+        // for the finally-block cleanup. The prior Promise.all could leak any
+        // engine that connected before another's connect() rejected.
+        const workerEngines: InstanceType<typeof PostgresEngine>[] = [];
+        try {
+          for (let i = 0; i < actualWorkers; i++) {
+            const eng = new PostgresEngine();
+            await eng.connect({ ...baseEngineConfig, poolSize: workerPoolSize });
+            workerEngines.push(eng);
+          }
 
         // Thread-safe queue: atomic index counter (JS is single-threaded; the
         // read-then-increment happens between awaits so no lock is needed).

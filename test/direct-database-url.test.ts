@@ -121,3 +121,36 @@ describe('bare-URL connect sites thread the direct override (static tripwire)', 
     expect(src).toMatch(/targetConfig\.direct_database_url\s*=/);
   });
 });
+
+describe('host/worker/reflex reuse the complete resolved EngineConfig (static tripwire)', () => {
+  // 2026-07 dedicated-schema wave: every connect site must spread the full
+  // toEngineConfig(config) (or a resolved EngineConfig) so postgres_schema +
+  // direct_database_url propagate. Reconstructing { database_url } by hand
+  // drops the field and silently falls back to legacy behavior.
+  test('brain-registry host uses toEngineConfig', () => {
+    const src = readFileSync(join(import.meta.dir, '../src/core/brain-registry.ts'), 'utf8');
+    expect(src).toMatch(/toEngineConfig\(config\)/);
+    expect(src).not.toMatch(/database_url:\s*config\.database_url/);
+  });
+
+  test('reflex uses toEngineConfig', () => {
+    const src = readFileSync(join(import.meta.dir, '../src/core/context/reflex.ts'), 'utf8');
+    expect(src).toMatch(/toEngineConfig\(cfg/);
+    expect(src).not.toMatch(/database_url:\s*cfg\?\.database_url/);
+  });
+
+  test('import worker spreads full engine config', () => {
+    const src = readFileSync(join(import.meta.dir, '../src/commands/import.ts'), 'utf8');
+    expect(src).toMatch(/toEngineConfig\(config\)/);
+    expect(src).toMatch(/\.\.\.baseEngineConfig,\s*poolSize/);
+    // No hand-built { database_url } connect calls remain.
+    expect(src).not.toMatch(/connect\(\s*\{\s*database_url:\s*databaseUrl/);
+  });
+
+  test('sync worker spreads full engine config', () => {
+    const src = readFileSync(join(import.meta.dir, '../src/commands/sync.ts'), 'utf8');
+    expect(src).toMatch(/toEngineConfig\(config\)/);
+    expect(src).toMatch(/\.\.\.baseEngineConfig,\s*poolSize/);
+    expect(src).not.toMatch(/connect\(\s*\{\s*database_url:\s*databaseUrl/);
+  });
+});

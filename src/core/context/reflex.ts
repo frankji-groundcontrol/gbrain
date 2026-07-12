@@ -18,7 +18,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mkdirSync, appendFileSync } from 'node:fs';
-import { loadConfig, type GBrainConfig } from '../config.ts';
+import { loadConfig, toEngineConfig, type GBrainConfig } from '../config.ts';
 import type { BrainEngine } from '../engine.ts';
 import {
   extractCandidates,
@@ -206,11 +206,7 @@ async function getPostgresEngine(cfg: GBrainConfig | null): Promise<BrainEngine 
   _pgPending = (async () => {
     try {
       const { createEngine } = await import('../engine-factory.ts');
-      const engineConfig = {
-        engine: 'postgres' as const,
-        database_url: cfg?.database_url,
-        database_path: cfg?.database_path,
-      };
+      const engineConfig = toEngineConfig(cfg ?? { engine: 'postgres' });
       const engine = await createEngine(engineConfig);
       await engine.connect(engineConfig);
       _pgEngine = engine;

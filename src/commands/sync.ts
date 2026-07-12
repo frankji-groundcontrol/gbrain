@@ -2563,7 +2563,8 @@ async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Promise<Sy
         const { resolvePoolSize } = await import('../core/db.ts');
         const workerPoolSize = Math.min(2, resolvePoolSize(2));
         const workerCount = Math.min(effectiveConcurrency, importsToDo.length);
-        const databaseUrl = config.database_url;
+        const { toEngineConfig } = await import('../core/config.ts');
+        const baseEngineConfig = toEngineConfig(config);
 
         // Q4 (v0.22.13): banner on stderr so stdout stays clean for --json.
         serr(`  Parallel sync: ${workerCount} workers for ${importsToDo.length} files`);
@@ -2576,7 +2577,7 @@ async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Promise<Sy
           // already-connected engines on any one failure.
           for (let i = 0; i < workerCount; i++) {
             const eng = new PostgresEngine();
-            await eng.connect({ database_url: databaseUrl, poolSize: workerPoolSize });
+            await eng.connect({ ...baseEngineConfig, poolSize: workerPoolSize });
             workerEngines.push(eng);
           }
 

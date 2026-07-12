@@ -162,13 +162,17 @@ export class PostgresEngine implements BrainEngine {
 
   // Lifecycle
   async connect(config: EngineConfig & { poolSize?: number; parentConnectionManager?: ConnectionManager }): Promise<void> {
-    this._savedConfig = config;
-    const url = config.database_url;
+    // Dedicated groundcontrol schema mode (2026-07): normalize at the first
+    // line so the resolved URLs are captured into _savedConfig and reused
+    // across reconnect/worker paths. No-op for legacy configs.
+    const { normalizeDedicatedPostgresConfig } = await import('./postgres-dedicated.ts');
+    const resolved = normalizeDedicatedPostgresConfig(config);
+    this._savedConfig = resolved;
+    const url = resolved.database_url;
     if (config.poolSize) {
       // Instance-level connection for worker isolation. resolvePoolSize lets
       // GBRAIN_POOL_SIZE cap below the caller's requested size when set — the
       // env var is a user escape hatch, so it wins.
-      const url = config.database_url;
       if (!url) throw new GBrainError('No database URL', 'database_url is missing', 'Provide --url');
       const size = Math.min(config.poolSize, db.resolvePoolSize(config.poolSize));
       // Honor PgBouncer transaction-mode detection on worker-instance pools too.
@@ -208,7 +212,8 @@ export class PostgresEngine implements BrainEngine {
       // manager so kill-switch state and direct pool are shared.
       this.connectionManager = new ConnectionManager({
         url,
-        directUrl: config.direct_database_url ?? null,
+        directUrl: resolved.direct_database_url ?? null,
+        postgresSchema: resolved.postgres_schema,
         parent: config.parentConnectionManager,
         readPoolOwnedExternally: true, // we own _sql; manager just routes
       });
@@ -219,14 +224,15 @@ export class PostgresEngine implements BrainEngine {
       // decided atomically inside connect() (no await between its null-check and
       // pool assignment), so two concurrent module connects can't both claim
       // ownership. Store the token; only the owner tears the singleton down.
-      this._ownsModuleSingleton = await db.connect(config);
+      this._ownsModuleSingleton = await db.connect(resolved);
       this._connectionStyle = 'module';
 
       // v0.30.1: connection-manager wraps the module singleton.
       if (url) {
         this.connectionManager = new ConnectionManager({
           url,
-          directUrl: config.direct_database_url ?? null,
+          directUrl: resolved.direct_database_url ?? null,
+          postgresSchema: resolved.postgres_schema,
           parent: config.parentConnectionManager,
           readPoolOwnedExternally: true, // db.ts owns the pool
         });
