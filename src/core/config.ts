@@ -2,6 +2,8 @@ import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync } from 'f
 import { isAbsolute, join } from 'path';
 import { homedir } from 'os';
 import type { EngineConfig, EmbeddingColumnConfig } from './types.ts';
+import { isDedicatedSchemaMode, normalizeDedicatedPostgresConfig } from './postgres-dedicated.ts';
+import { redactConnectionInfo } from './audit/redact-connection-info.ts';
 
 /**
  * Where is the active DB URL coming from? Pure introspection, no connection
@@ -56,6 +58,16 @@ export interface GBrainConfig {
    * session-mode pooler without needing shell env.
    */
   direct_database_url?: string;
+  /**
+   * Dedicated groundcontrol schema mode (2026-07). File-plane startup field:
+   * it sizes the search path BEFORE the DB-resident config table is reachable,
+   * so it cannot live in the DB plane. Env override
+   * `GBRAIN_POSTGRES_SCHEMA=groundcontrol` wins over the file value. Only the
+   * literal `'groundcontrol'` is accepted; any other value throws at load.
+   * `gbrain config set postgres_schema` is hard-rejected (see src/commands/config.ts).
+   * See src/core/postgres-dedicated.ts.
+   */
+  postgres_schema?: 'groundcontrol';
   /** AI gateway config (v0.14+). v0.36+ default: "zeroentropyai:zembed-1" / 1280 / "anthropic:claude-haiku-4-5-20251001". */
   embedding_model?: string;
   embedding_dimensions?: number;
@@ -543,6 +555,7 @@ export function loadConfig(): GBrainConfig | null {
     ...(process.env.ZEROENTROPY_API_KEY ? { zeroentropy_api_key: process.env.ZEROENTROPY_API_KEY } : {}),
     ...(process.env.DASHSCOPE_API_KEY ? { dashscope_api_key: process.env.DASHSCOPE_API_KEY } : {}),
     ...(process.env.GBRAIN_DIRECT_DATABASE_URL ? { direct_database_url: process.env.GBRAIN_DIRECT_DATABASE_URL } : {}),
+    ...(process.env.GBRAIN_POSTGRES_SCHEMA ? { postgres_schema: process.env.GBRAIN_POSTGRES_SCHEMA } : {}),
     ...(process.env.GBRAIN_EMBEDDING_MODEL ? { embedding_model: process.env.GBRAIN_EMBEDDING_MODEL } : {}),
     ...(process.env.GBRAIN_EMBEDDING_DIMENSIONS ? { embedding_dimensions: parseInt(process.env.GBRAIN_EMBEDDING_DIMENSIONS, 10) } : {}),
     ...(process.env.GBRAIN_EXPANSION_MODEL ? { expansion_model: process.env.GBRAIN_EXPANSION_MODEL } : {}),
@@ -606,6 +619,21 @@ export function loadConfig(): GBrainConfig | null {
       ...(fileConfig?.content_sanity ?? {}),
       ...envContentSanity,
     };
+  }
+
+  // Dedicated groundcontrol schema mode (2026-07). Validate the fixed value
+  // BEFORE any ConnectionManager is constructed, then normalize both URLs
+  // onto the authoritative search path. A bad value or conflicting URL
+  // throws here so every caller of loadConfig() sees canonical URLs or
+  // nothing. See src/core/postgres-dedicated.ts.
+  if ((merged as GBrainConfig).postgres_schema !== undefined) {
+    if (!isDedicatedSchemaMode(merged as GBrainConfig)) {
+      const v = JSON.stringify((merged as GBrainConfig).postgres_schema);
+      throw new Error(
+        `[groundcontrol] postgres_schema must be exactly "groundcontrol" (got ${redactConnectionInfo(v)})`,
+      );
+    }
+    Object.assign(merged, normalizeDedicatedPostgresConfig(merged as GBrainConfig));
   }
 
   return merged as GBrainConfig;
@@ -1033,6 +1061,7 @@ export function toEngineConfig(config: GBrainConfig): EngineConfig {
     database_url: config.database_url,
     database_path: config.database_path,
     direct_database_url: config.direct_database_url,
+    ...(config.postgres_schema ? { postgres_schema: config.postgres_schema } : {}),
   };
 }
 

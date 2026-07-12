@@ -3,6 +3,7 @@ import { GBrainError, type EngineConfig } from './types.ts';
 import { SCHEMA_SQL } from './schema-embedded.ts';
 import type { BrainEngine } from './engine.ts';
 import { verifySchema } from './schema-verify.ts';
+import { normalizeDedicatedPostgresConfig } from './postgres-dedicated.ts';
 
 let sql: ReturnType<typeof postgres> | null = null;
 let connectedUrl: string | null = null;
@@ -223,7 +224,11 @@ export async function connect(config: EngineConfig): Promise<boolean> {
     return false; // joined an existing singleton — caller is a borrower
   }
 
-  const url = config.database_url;
+  // Dedicated groundcontrol schema mode (2026-07): normalize the URL before
+  // pool construction so the module singleton also resolves against the
+  // authoritative search path. No-op for legacy configs.
+  const resolved = normalizeDedicatedPostgresConfig(config);
+  const url = resolved.database_url ?? config.database_url;
   if (!url) {
     throw new GBrainError(
       'No database URL',

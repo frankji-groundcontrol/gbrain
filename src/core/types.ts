@@ -1642,6 +1642,14 @@ export interface EngineConfig {
    * wins over the config-file value); consumed by ConnectionManager.
    */
   direct_database_url?: string;
+  /**
+   * Dedicated groundcontrol schema mode (2026-07). When set to exactly
+   * `'groundcontrol'`, loadConfig + the Postgres connection boundary
+   * normalize both URLs onto the authoritative `groundcontrol,extensions`
+   * search path and fail before DDL on any mismatch. Absent = legacy
+   * behavior unchanged. See src/core/postgres-dedicated.ts.
+   */
+  postgres_schema?: 'groundcontrol';
 }
 
 // Errors

@@ -40,6 +40,7 @@ import postgres from 'postgres';
 import { resolvePrepare, resolveSessionTimeouts, resolvePoolSize, endPoolBounded } from './db.ts';
 import { redactPgUrl } from './url-redact.ts';
 import { logConnectionEvent } from './connection-audit.ts';
+import { normalizeDedicatedPostgresConfig } from './postgres-dedicated.ts';
 
 export type Sql = ReturnType<typeof postgres>;
 
@@ -71,6 +72,13 @@ export interface ConnectionManagerOpts {
    * not call .end() on disconnect(). Default false (we own both pools).
    */
   readPoolOwnedExternally?: boolean;
+  /**
+   * Dedicated groundcontrol schema mode (2026-07). When set, both the primary
+   * and direct URLs are defensively re-normalized onto the authoritative
+   * search path at construction, so library callers that build an EngineConfig
+   * by hand cannot bypass the loadConfig() gate.
+   */
+  postgresSchema?: 'groundcontrol';
 }
 
 /** Default direct-pool size (P1 raised from 2 to 3). Override via env. */
@@ -200,11 +208,11 @@ export class ConnectionManager {
   private _isSupabase: boolean;
 
   constructor(opts: ConnectionManagerOpts) {
-    this.opts = opts;
     this._readPoolOwnedExternally = opts.readPoolOwnedExternally === true;
 
     // A2: kill-switch resolution. Parent overrides env when present.
     if (opts.parent) {
+      this.opts = opts;
       this._killSwitch = opts.parent.isKillSwitchActive();
       this._isSupabase = opts.parent.isSupabase();
       this._directUrl = opts.parent.resolveDirectUrl();
@@ -212,10 +220,22 @@ export class ConnectionManager {
       this._readPoolOwnedExternally = true; // never end the parent's pool
     } else {
       this._killSwitch = readKillSwitchEnv();
-      this._isSupabase = isSupabasePoolerUrl(opts.url);
-      // Direct URL: explicit override > env > derive > null
+      // Dedicated-mode defensive boundary (2026-07): re-normalize both URLs
+      // before any pool opens. This is belt-and-suspenders over the
+      // loadConfig() gate; library callers that construct a ConnectionManager
+      // directly still fail closed on a conflicting search_path. The
+      // normalized primary URL replaces opts.url so getReadPool() constructs
+      // against the canonical search path.
+      const normalized = normalizeDedicatedPostgresConfig({
+        database_url: opts.url,
+        direct_database_url: opts.directUrl ?? undefined,
+        postgres_schema: opts.postgresSchema,
+      });
+      this.opts = { ...opts, url: normalized.database_url!, directUrl: normalized.direct_database_url ?? null };
+      this._isSupabase = isSupabasePoolerUrl(normalized.database_url!);
+      // Direct URL: explicit (now normalized) override > env > derive > null
       const envOverride = process.env.GBRAIN_DIRECT_DATABASE_URL;
-      this._directUrl = opts.directUrl ?? envOverride ?? deriveDirectUrl(opts.url);
+      this._directUrl = normalized.direct_database_url ?? envOverride ?? deriveDirectUrl(normalized.database_url!);
     }
   }
 

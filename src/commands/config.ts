@@ -116,6 +116,19 @@ export async function runConfig(engine: BrainEngine, args: string[]) {
     // write preserves the split-brain footgun the wave exists to close.
     // Switching providers requires wipe-and-reinit; the recipe below is
     // paste-ready and uses the actual command path that works after Lane B.
+    // Dedicated groundcontrol schema mode (2026-07): postgres_schema is a
+    // file-plane startup field. It must be resolved BEFORE the DB-resident
+    // config table is reachable (it sizes the connection search path), so a
+    // DB-plane write is structurally a no-op — the connection is already
+    // open by the time the DB config store is read. Reject hard with the
+    // correct edit surfaces.
+    if (key === 'postgres_schema') {
+      console.error(`[config] postgres_schema is a file-plane startup field.`);
+      console.error(`[config] Set it in ~/.gbrain/config.json or via GBRAIN_POSTGRES_SCHEMA.`);
+      console.error(`[config] The DB-plane store is read after connecting, so it cannot size the schema.`);
+      process.exit(1);
+    }
+
     if (key === 'embedding_model' || key === 'embedding_dimensions') {
       const { gbrainPath } = await import('../core/config.ts');
       const isPgliteEngine = (await import('../core/config.ts')).loadConfig()?.engine === 'pglite';
