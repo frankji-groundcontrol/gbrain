@@ -25,10 +25,6 @@ describe('dedicated-config-persistence (serial) — init/migrate-engine wiring',
   let home: string;
   const savedHome = process.env.GBRAIN_HOME;
 
-  test.beforeEach && test.beforeEach(() => {
-    // test.beforeEach isn't available here, so use per-test setup.
-  });
-
   test('init.ts threads postgres_schema into engine.connect', () => {
     const src = readFileSync(join(import.meta.dir, '../src/commands/init.ts'), 'utf8');
     expect(src).toMatch(/postgres_schema:\s*postgresSchema/);

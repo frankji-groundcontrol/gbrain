@@ -137,7 +137,11 @@ describe('attemptMigration — transactional atomicity (Task 6)', () => {
     expect(engine.setConfigCalls.find((c) => c.key === 'version' && c.value === '2')).toBeDefined();
   });
 
-  test('handler failure prevents version advancement (transactional rollback)', async () => {
+  test('handler failure prevents version advancement (handler runs after txn commit)', async () => {
+    // The handler runs AFTER the DDL transaction commits (historical handlers
+    // use CREATE INDEX CONCURRENTLY which can't run inside a txn). A handler
+    // failure does NOT roll back the DDL, but DOES prevent the version bump
+    // so the migration is re-runnable (DDL is idempotent).
     const engine = makeFakeEngine({ config: { version: '1' } });
     const m = makeMigration({
       version: 2,
@@ -183,19 +187,22 @@ describe('attemptMigration — transactional atomicity (Task 6)', () => {
     expect(engine.setConfigCalls.find((c) => c.key === 'version')).toBeUndefined();
   });
 
-  test('source-level: transactional path keeps setConfig inside engine.transaction', () => {
+  test('source-level: transactional path runs verify inside engine.transaction', () => {
     const src = readFileSync(join(import.meta.dir, '../src/core/migrate.ts'), 'utf8');
     expect(src).toMatch(/export async function attemptMigration/);
-    // Extract the attemptMigration function body so we check ONLY its
-    // transaction block (not v23's handler transaction elsewhere in the file).
+    // Extract the attemptMigration function body.
     const fnMatch = src.match(/export async function attemptMigration[\s\S]*?\n}\n/);
     expect(fnMatch).not.toBeNull();
     const fnBody = fnMatch![0];
     expect(fnBody).toMatch(/engine\.transaction\(async \(tx\) =>/);
-    // Verify + version commit together inside the transaction callback.
+    // The transaction block contains the verify probe (read-only, safe in txn).
     const txnBlock = fnBody.match(/engine\.transaction\(async \(tx\) => \{[\s\S]*?\n    \}\);/);
     expect(txnBlock).not.toBeNull();
-    expect(txnBlock![0]).toMatch(/setConfig\('version'/);
     expect(txnBlock![0]).toMatch(/m\.verify/);
+    // The handler + setConfig run AFTER the transaction (handlers may use
+    // CREATE INDEX CONCURRENTLY).
+    const afterTxn = fnBody.slice(fnBody.indexOf('});') + 3);
+    expect(afterTxn).toMatch(/m\.handler/);
+    expect(afterTxn).toMatch(/setConfig\('version'/);
   });
 });

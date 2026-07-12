@@ -45,6 +45,7 @@ const ALL_E2E = [
   "test/e2e/doctor-progress.test.ts",
   "test/e2e/frontmatter-migration.test.ts",
   "test/e2e/openclaw-reference-compat.test.ts",
+  "test/e2e/groundcontrol-dedicated-schema.test.ts",
 ];
 
 function select(changedFiles: string[]): string[] {

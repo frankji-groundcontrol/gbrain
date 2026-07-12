@@ -5855,6 +5855,12 @@ export async function attemptMigration(engine: BrainEngine, m: Migration): Promi
   const useTransaction = m.transaction !== false;
 
   if (useTransaction || engine.kind === 'pglite') {
+    // Transactional path: SQL + verify run inside one transaction so a verify
+    // failure rolls back the DDL. The handler runs AFTER the transaction
+    // commits because historical handlers (v14, v66, v91, v105) use
+    // CREATE INDEX CONCURRENTLY which cannot run inside a transaction block.
+    // The version is bumped AFTER the handler succeeds so a handler failure
+    // leaves the migration un-recorded (re-runnable, since SQL is idempotent).
     await engine.transaction(async (tx) => {
       if (engine.kind === 'postgres') {
         try {
@@ -5863,11 +5869,6 @@ export async function attemptMigration(engine: BrainEngine, m: Migration): Promi
       }
       if (sql) {
         await tx.runMigration(m.version, sql);
-      }
-      // Pass the transaction-scoped engine so handler + verify statements
-      // ride the same connection and commit/rollback together with the DDL.
-      if (m.handler) {
-        await m.handler(tx);
       }
       if (m.verify) {
         const ok = await m.verify(tx).catch(() => false);
@@ -5879,10 +5880,13 @@ export async function attemptMigration(engine: BrainEngine, m: Migration): Promi
           );
         }
       }
-      // Version advancement inside the same transaction: commits together,
-      // rolls back together if anything above throws.
-      await tx.setConfig('version', String(m.version));
     });
+    // Handler runs on the outer engine after the DDL transaction committed.
+    // CONCURRENTLY and other non-transactional DDL live here.
+    if (m.handler) {
+      await m.handler(engine);
+    }
+    await engine.setConfig('version', String(m.version));
     return;
   }
 

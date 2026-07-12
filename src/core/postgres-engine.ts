@@ -243,6 +243,14 @@ export class PostgresEngine implements BrainEngine {
       // postgres.js client disconnects mid-transaction. See resolveSessionTimeouts
       // in db.ts for context + env var overrides.
       const timeouts = db.resolveSessionTimeouts();
+      // Dedicated mode: postgres.js does NOT parse search_path from the URL
+      // query string (unlike libpq). Send it as a startup parameter via the
+      // `connection` option so every backend in the pool resolves objects in
+      // the authoritative schema. Startup parameters survive PgBouncer
+      // transaction mode (same reason timeouts use this path).
+      if (resolved.postgres_schema) {
+        timeouts.search_path = 'groundcontrol,extensions';
+      }
       const opts: Record<string, unknown> = {
         max: size,
         idle_timeout: 20,
@@ -368,7 +376,10 @@ export class PostgresEngine implements BrainEngine {
       SELECT
         current_user,
         current_schema() AS current_schema,
-        (regexp_split_to_array(current_setting('server_version'), '\.'))[1]::int AS pg_version,
+        -- server_version_num is a clean integer (e.g. 160010); divide by
+        -- 10000 for the major version. More robust than parsing server_version
+        -- which can carry suffixes like "(Debian 16.10-1.pgdg120+1)".
+        current_setting('server_version_num')::int / 10000 AS pg_version,
         (SELECT rolname FROM pg_namespace n JOIN pg_roles r ON r.oid = n.nspowner WHERE n.nspname = 'groundcontrol') AS schema_owner,
         has_database_privilege(current_database(), 'CONNECT') AS has_connect,
         has_schema_privilege(current_user, 'public', 'USAGE') AS has_usage_public,

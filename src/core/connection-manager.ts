@@ -279,6 +279,11 @@ export class ConnectionManager {
       types: { bigint: postgres.BigInt },
     };
     const timeouts = resolveSessionTimeouts();
+    // Dedicated mode: forward the search_path startup parameter (postgres.js
+    // does not parse it from the URL query string).
+    if (this.opts.postgresSchema) {
+      timeouts.search_path = 'groundcontrol,extensions';
+    }
     if (Object.keys(timeouts).length > 0) opts.connection = timeouts;
     const prepare = resolvePrepare(this.opts.url);
     if (typeof prepare === 'boolean') opts.prepare = prepare;
@@ -352,6 +357,18 @@ export class ConnectionManager {
       throw new Error('connection-manager: cannot init direct pool — no direct URL');
     }
     const size = resolveDirectPoolSize(this.opts.directPoolSize);
+    // Apply DDL session GUCs as connection startup parameters (durable
+    // through any intermediary pooling layer, same trick as
+    // resolveSessionTimeouts). Dedicated mode also pins the search_path
+    // (postgres.js does not parse it from the URL query string).
+    const connectionStartup: Record<string, string> = {
+      statement_timeout: String(DDL_STMT_TIMEOUT_MS),
+      idle_in_transaction_session_timeout: String(DDL_IDLE_TX_TIMEOUT_MS),
+      maintenance_work_mem: BULK_MAINTENANCE_WORK_MEM,
+    };
+    if (this.opts.postgresSchema) {
+      connectionStartup.search_path = 'groundcontrol,extensions';
+    }
     const opts: Record<string, unknown> = {
       max: size,
       idle_timeout: 20,
@@ -360,14 +377,7 @@ export class ConnectionManager {
       // Always use prepared statements on the direct pool — no PgBouncer
       // here, so the prepare-cache invalidation issue doesn't apply.
       prepare: true,
-      // Apply DDL session GUCs as connection startup parameters (durable
-      // through any intermediary pooling layer, same trick as
-      // resolveSessionTimeouts).
-      connection: {
-        statement_timeout: String(DDL_STMT_TIMEOUT_MS),
-        idle_in_transaction_session_timeout: String(DDL_IDLE_TX_TIMEOUT_MS),
-        maintenance_work_mem: BULK_MAINTENANCE_WORK_MEM,
-      },
+      connection: connectionStartup,
     };
     const t0 = Date.now();
     try {

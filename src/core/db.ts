@@ -240,6 +240,13 @@ export async function connect(config: EngineConfig): Promise<boolean> {
   try {
     const prepare = resolvePrepare(url);
     const timeouts = resolveSessionTimeouts();
+    // Dedicated groundcontrol mode: postgres.js does NOT parse search_path
+    // from the URL query string (unlike libpq). Send it as a startup
+    // parameter so every pool backend resolves objects in the authoritative
+    // schema. Startup parameters survive PgBouncer transaction mode.
+    if (resolved.postgres_schema) {
+      timeouts.search_path = 'groundcontrol,extensions';
+    }
     const opts: Record<string, unknown> = {
       max: resolvePoolSize(),
       idle_timeout: 20,

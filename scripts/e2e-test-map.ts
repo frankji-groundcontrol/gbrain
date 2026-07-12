@@ -45,7 +45,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/cycle/synthesize.ts": ["test/e2e/multi-source-bug-class.test.ts"],
   "src/commands/embed.ts": ["test/e2e/multi-source-bug-class.test.ts"],
   "src/commands/extract.ts": ["test/e2e/multi-source-bug-class.test.ts"],
-  "src/commands/migrate-engine.ts": ["test/e2e/multi-source-bug-class.test.ts"],
+  "src/commands/migrate-engine.ts": ["test/e2e/multi-source-bug-class.test.ts", "test/e2e/groundcontrol-dedicated-schema.test.ts"],
   // Any minions queue/worker/handler change exercises all minion E2E.
   "src/core/minions/**": [
     "test/e2e/minions-concurrency.test.ts",
@@ -61,6 +61,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/jsonb-roundtrip.test.ts",
     "test/e2e/engine-parity.test.ts",
     "test/e2e/schema-drift.test.ts",
+    "test/e2e/groundcontrol-dedicated-schema.test.ts",
   ],
   // PGLite bootstrap path + parity guard.
   "src/core/pglite-engine.ts": [
@@ -105,4 +106,15 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/ingestion-roundtrip.test.ts",
     "test/e2e/serve-http-ingest-webhook.test.ts",
   ],
+  // 2026-07 dedicated groundcontrol schema wave. Narrow entries for the
+  // dedicated-mode code paths. NOTE: src/schema.sql, src/core/migrate.ts,
+  // and src/core/db.ts are deliberately NOT mapped here — they are selector
+  // escape hatches that already select all E2E via the fail-closed fallback.
+  "src/core/postgres-dedicated.ts": ["test/e2e/groundcontrol-dedicated-schema.test.ts"],
+  "src/core/config.ts": ["test/e2e/groundcontrol-dedicated-schema.test.ts"],
+  "src/core/types.ts": ["test/e2e/groundcontrol-dedicated-schema.test.ts"],
+  "src/core/connection-manager.ts": ["test/e2e/groundcontrol-dedicated-schema.test.ts"],
+  "src/core/entities/resolve.ts": ["test/e2e/groundcontrol-dedicated-schema.test.ts"],
+  "src/core/retrieval-upgrade-planner.ts": ["test/e2e/groundcontrol-dedicated-schema.test.ts"],
+  "src/commands/init.ts": ["test/e2e/groundcontrol-dedicated-schema.test.ts"],
 };
