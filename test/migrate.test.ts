@@ -2243,3 +2243,70 @@ describe('v117 — context_volunteer_events_table', () => {
     expect(left.map(r => r.slug)).toEqual(['people/alice-example']);
   });
 });
+
+// Dedicated groundcontrol schema mode (2026-07) — selectMigrationSql.
+describe('selectMigrationSql — dedicated variant selection', () => {
+  const { selectMigrationSql } = require('../src/core/migrate.ts') as typeof import('../src/core/migrate.ts');
+
+  function fakeEngine(dedicated: boolean) {
+    return {
+      kind: 'postgres' as const,
+      isDedicatedSchemaMode: () => dedicated,
+    } as unknown as BrainEngine;
+  }
+
+  function find(version: number) {
+    const m = MIGRATIONS.find((v) => v.version === version);
+    if (!m) throw new Error(`migration ${version} not found`);
+    return m;
+  }
+
+  test('dedicated v24 returns empty SQL', () => {
+    expect(selectMigrationSql(find(24), fakeEngine(true))).toBe('');
+  });
+
+  test('dedicated v29 returns empty SQL', () => {
+    expect(selectMigrationSql(find(29), fakeEngine(true))).toBe('');
+  });
+
+  test('dedicated v35 returns empty SQL', () => {
+    expect(selectMigrationSql(find(35), fakeEngine(true))).toBe('');
+  });
+
+  test('dedicated v31 keeps table/index DDL, drops BYPASSRLS and ENABLE RLS', () => {
+    const sql = selectMigrationSql(find(31), fakeEngine(true)) ?? '';
+    expect(sql).toMatch(/CREATE TABLE/);
+    expect(sql).not.toMatch(/BYPASSRLS/);
+    expect(sql).not.toMatch(/ENABLE ROW LEVEL SECURITY/);
+  });
+
+  test('dedicated v120 targets current_schema and avoids literal public', () => {
+    const sql = selectMigrationSql(find(120), fakeEngine(true)) ?? '';
+    expect(sql).toMatch(/current_schema\(\)/);
+    // No literal `nspname = 'public'` probe (the functions live in groundcontrol).
+    expect(sql).not.toMatch(/n\.nspname = 'public'/);
+    expect(sql).toMatch(/groundcontrol, extensions/);
+  });
+
+  test('default selection is byte-identical to the registry base', () => {
+    for (const version of [24, 29, 31, 35, 120]) {
+      const m = find(version);
+      const expected = m.sqlFor?.postgres ?? m.sql;
+      expect(selectMigrationSql(m, fakeEngine(false)), `v${version}`).toBe(expected);
+    }
+  });
+
+  test('non-postgres engine returns base SQL even when dedicated predicate set', () => {
+    const m = find(120);
+    const pgliteBase = m.sqlFor?.pglite ?? m.sql;
+    const fakePglite = { kind: 'pglite' as const, isDedicatedSchemaMode: () => true } as unknown as BrainEngine;
+    expect(selectMigrationSql(m, fakePglite)).toBe(pgliteBase);
+  });
+
+  test('engine without isDedicatedSchemaMode method returns base SQL', () => {
+    const m = find(120);
+    const base = m.sqlFor?.postgres ?? m.sql;
+    const bare = { kind: 'postgres' as const } as unknown as BrainEngine;
+    expect(selectMigrationSql(m, bare)).toBe(base);
+  });
+});

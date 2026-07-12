@@ -14,7 +14,7 @@ import { slugifyPath } from './sync.ts';
  * (e.g., data transformations that need TypeScript, not just SQL).
  */
 
-interface Migration {
+export interface Migration {
   version: number;
   name: string;
   /** Engine-agnostic SQL. Used when `sqlFor` is absent. Set to '' for handler-only or sqlFor-only migrations. */
@@ -5832,6 +5832,103 @@ export function isDeadlockError(err: unknown): boolean {
   return /40P01|deadlock detected/i.test(msg);
 }
 
+/**
+ * Dedicated groundcontrol schema mode (2026-07): narrow per-migration variant
+ * selection. Leaves every historical `Migration` object byte-identical; the
+ * switch lives outside the registry so legacy brains see no change.
+ *
+ * Dedicated mode branches:
+ *   - v24, v29, v35: return '' (public-schema RLS / event-trigger work that
+ *     the restricted role cannot and should not perform).
+ *   - v31: keep the table + index DDL, strip the BYPASSRLS gate + ENABLE RLS.
+ *   - v120: target `current_schema()` instead of literal `'public'`, and set
+ *     `search_path = pg_catalog, groundcontrol, extensions` on the gbrain
+ *     trigger functions.
+ *   - every other migration: return the base SQL unchanged.
+ *
+ * Detects dedicated mode through a structural narrow of the concrete
+ * PostgresEngine predicate (`isDedicatedSchemaMode`). Does NOT widen
+ * `BrainEngine`.
+ */
+export function selectMigrationSql(m: Migration, engine: BrainEngine): string | undefined {
+  const base = m.sqlFor?.[engine.kind] ?? m.sql;
+  if (engine.kind !== 'postgres') return base;
+  // Structural narrow: avoid importing PostgresEngine (cycle) and avoid
+  // widening BrainEngine. The dedicated-mode predicate is optional on the
+  // interface; non-Postgres engines never reach this branch.
+  const pe = engine as BrainEngine & { isDedicatedSchemaMode?: () => boolean };
+  if (typeof pe.isDedicatedSchemaMode !== 'function' || !pe.isDedicatedSchemaMode()) return base;
+  switch (m.version) {
+    case 24:
+    case 29:
+    case 35:
+      return '';
+    case 31:
+      return stripRlsFromV31(base);
+    case 120:
+      return dedicatedV120Sql();
+    default:
+      return base;
+  }
+}
+
+/**
+ * v31 dedicated variant: keep the CREATE TABLE + CREATE INDEX DDL, drop the
+ * DO $$ BYPASSRLS gate, the RAISE EXCEPTION guard, and the ENABLE ROW LEVEL
+ * SECURITY statements (the restricted role has NOBYPASSRLS, and public-
+ * facing RLS belongs to the operator).
+ *
+ * The v31 postgres SQL wraps everything in one DO $$ ... END $$ block. We
+ * extract only the application DDL (CREATE TABLE / CREATE INDEX) and emit it
+ * as bare statements (no DO wrapper, no BYPASSRLS gate, no RLS). Idempotent
+ * because every extracted statement uses IF NOT EXISTS.
+ */
+function stripRlsFromV31(base: string | undefined): string {
+  if (!base) return '';
+  // Pull every CREATE TABLE IF NOT EXISTS ... ; and CREATE INDEX IF NOT EXISTS ... ; statement.
+  // The v31 DDL is simple (no nested semicolons inside the CREATE bodies), so a
+  // statement-level scan is safe here. ponytail: ceiling — this is a narrow
+  // extractor for ONE migration's known shape; if v31's SQL ever gains a
+  // semicolon inside a string literal, this would split wrong. Upgrade path:
+  // a real SQL tokenizer, or store the dedicated variant as a literal.
+  const statements: string[] = [];
+  const ddlPattern = /(?:CREATE TABLE IF NOT EXISTS\s+\w+[\s\S]*?;|CREATE INDEX IF NOT EXISTS\s+\w+[\s\S]*?;)/g;
+  let match: RegExpExecArray | null;
+  while ((match = ddlPattern.exec(base)) !== null) {
+    statements.push(match[0]);
+  }
+  return statements.length > 0 ? statements.join('\n') + '\n' : '';
+}
+
+/**
+ * v120 dedicated variant: the trigger functions live in `groundcontrol`, so
+ * the catalog probe must target `current_schema()` and the ALTER FUNCTION
+ * must set `search_path = pg_catalog, groundcontrol, extensions`. The
+ * security_invoker view tweak is retained (harmless under dedicated mode).
+ */
+function dedicatedV120Sql(): string {
+  return `
+        ALTER VIEW IF EXISTS page_links SET (security_invoker = on);
+
+        DO $$
+        DECLARE fn text;
+        BEGIN
+          FOREACH fn IN ARRAY ARRAY[
+            'bump_page_generation_fn','bump_page_generation_clock_fn',
+            'update_chunk_search_vector','update_page_search_vector',
+            'notify_minion_job_change','auto_enable_rls'
+          ] LOOP
+            IF EXISTS (
+              SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+              WHERE n.nspname = current_schema() AND p.proname = fn
+            ) THEN
+              EXECUTE format('ALTER FUNCTION %I.%I() SET search_path = pg_catalog, groundcontrol, extensions', current_schema(), fn);
+            END IF;
+          END LOOP;
+        END $$;
+      `;
+}
+
 export async function runMigrations(engine: BrainEngine): Promise<{ applied: number; current: number }> {
   const currentStr = await engine.getConfig('version');
   const current = parseInt(currentStr || '1', 10);
@@ -5879,7 +5976,9 @@ export async function runMigrations(engine: BrainEngine): Promise<{ applied: num
     process.stderr.write(`  [${m.version}] ${m.name}...\n`);
 
     // Pick SQL: engine-specific `sqlFor` wins over engine-agnostic `sql`.
-    const sql = m.sqlFor?.[engine.kind] ?? m.sql;
+    // Dedicated groundcontrol mode (2026-07) narrows certain migrations via
+    // `selectMigrationSql`; legacy brains see byte-identical selection.
+    const sql = selectMigrationSql(m, engine);
 
     if (sql) {
       try {
