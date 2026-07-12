@@ -152,6 +152,36 @@ gbrain exists to fix. The rules that keep it from recurring:
   `docs/practices/` — updating each folder's README index. Don't grow this file
   when a modular doc + a reference-map row works.
 
+## Fork sync and conflict records
+
+This checkout's canonical sync path is one-way:
+
+    https://github.com/garrytan/gbrain (upstream/master, fetch only)
+      → https://github.com/frankji-groundcontrol/gbrain (origin/master)
+      → origin/franky
+
+Use this sequence; never commit or push to `upstream`:
+
+```bash
+git remote set-url origin https://github.com/frankji-groundcontrol/gbrain.git
+git remote get-url upstream >/dev/null 2>&1 \
+  && git remote set-url upstream https://github.com/garrytan/gbrain.git \
+  || git remote add upstream https://github.com/garrytan/gbrain.git
+git remote set-url --push upstream DISABLED
+git fetch upstream --prune
+git push origin upstream/master:master
+git fetch origin --prune
+git switch franky
+git merge --no-edit origin/master
+git push origin franky
+```
+
+If the merge conflicts, resolve it before the final push and save an append-only
+record under `docs/resolve/`: use `YYYY-MM-DD-what-was-resolved.md` for a simple
+resolution, or `YYYY-MM-DD-what-was-resolved/README.md` plus supporting files for
+a complicated one. Record the refs, conflicted files, decisions, verification,
+and resulting commit; update `docs/resolve/README.md` and `docs/README.md`.
+
 ## Search Mode
 
 GBrain ships three named search modes — `conservative`, `balanced`, `tokenmax`

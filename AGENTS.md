@@ -137,7 +137,41 @@ Never commit real names of people, companies, or funds into public artifacts. Se
 Privacy rule in `./CLAUDE.md`. GBrain pages reference real contacts; public docs must
 use generic placeholders (`alice-example`, `acme-example`, `fund-a`).
 
-## Forks
+## Fork sync
 
-If you are a fork, regenerate `llms.txt` + `llms-full.txt` with your own URL base before
-publishing: `LLMS_REPO_BASE=https://raw.githubusercontent.com/your-org/your-fork/main bun run build:llms`.
+This checkout pulls from the canonical repository into the fork, then updates
+`franky`. Never commit or push to `garrytan/gbrain`:
+
+```text
+upstream/master (garrytan/gbrain, fetch only)
+  -> origin/master (frankji-groundcontrol/gbrain)
+  -> origin/franky
+```
+
+```bash
+git remote set-url origin https://github.com/frankji-groundcontrol/gbrain.git
+git remote get-url upstream >/dev/null 2>&1 \
+  && git remote set-url upstream https://github.com/garrytan/gbrain.git \
+  || git remote add upstream https://github.com/garrytan/gbrain.git
+git remote set-url --push upstream DISABLED
+git fetch upstream --prune
+git push origin upstream/master:master
+git fetch origin --prune
+git switch franky
+git merge --no-edit origin/master
+git push origin franky
+```
+
+When the merge conflicts, save the resolution record before finishing:
+
+- Simple: `docs/resolve/YYYY-MM-DD-what-was-resolved.md`
+- Complicated: `docs/resolve/YYYY-MM-DD-what-was-resolved/README.md` with
+  supporting files in that directory
+
+Every record names the refs, conflicted files, chosen resolution, verification,
+and resulting commit. Add it to `docs/resolve/README.md` and `docs/README.md`.
+
+## Fork publishing
+
+When publishing a fork, regenerate `llms.txt` + `llms-full.txt` with its URL base:
+`LLMS_REPO_BASE=https://raw.githubusercontent.com/your-org/your-fork/main bun run build:llms`.

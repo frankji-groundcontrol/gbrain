@@ -178,6 +178,9 @@ are added, not rewritten.
 - [updates/](updates/README.md) — one file per shipped, user-facing change; the
   modular per-change home that feeds the version-stamped `CHANGELOG.md` at
   release time.
+- [resolve/](resolve/README.md) — dated, append-only fork-sync conflict records:
+  refs merged, conflicted files, chosen resolution, verification, and resulting
+  commit.
 - [incidents/](incidents/2026-05-20-lsd-cost-explosion.md) — post-mortems
   (currently one: the lsd/brainstorm cost-overrun incident).
 - [proposals/](proposals/temporal-contradiction-probe.md) — RFCs (currently
