@@ -5833,6 +5833,86 @@ export function isDeadlockError(err: unknown): boolean {
 }
 
 /**
+ * Task 6 (2026-07): run one migration as a complete attempt — SQL + handler
+ * + verify + version advancement commit together for transactional migrations,
+ * or run in sequence for non-transactional (CONCURRENTLY) migrations with the
+ * version advancing only after verify succeeds.
+ *
+ * Transactional path: everything runs inside `engine.transaction()`. A failure
+ * at any step rolls back the transaction; the version is never advanced.
+ *
+ * Non-transactional path: the SQL runs on a reserved connection (can't be in
+ * a transaction — CREATE INDEX CONCURRENTLY refuses it), then the handler +
+ * verify run, then `setConfig('version', ...)`. If the handler or verify
+ * throws, the version is NOT advanced (the DDL already committed — we can't
+ * claim atomicity for CONCURRENTLY, only that version advancement is gated on
+ * verify success).
+ *
+ * Exported for unit testing (`test/migration-attempt.test.ts`).
+ */
+export async function attemptMigration(engine: BrainEngine, m: Migration): Promise<void> {
+  const sql = selectMigrationSql(m, engine);
+  const useTransaction = m.transaction !== false;
+
+  if (useTransaction || engine.kind === 'pglite') {
+    await engine.transaction(async (tx) => {
+      if (engine.kind === 'postgres') {
+        try {
+          await tx.runMigration(m.version, "SET LOCAL statement_timeout = '600000'");
+        } catch { /* non-fatal: older Postgres or restricted GUC */ }
+      }
+      if (sql) {
+        await tx.runMigration(m.version, sql);
+      }
+      // Pass the transaction-scoped engine so handler + verify statements
+      // ride the same connection and commit/rollback together with the DDL.
+      if (m.handler) {
+        await m.handler(tx);
+      }
+      if (m.verify) {
+        const ok = await m.verify(tx).catch(() => false);
+        if (!ok) {
+          throw new MigrationDriftError(
+            m.version,
+            m.name,
+            `Schema does not match expected post-condition. Run with --skip-verify to force.`,
+          );
+        }
+      }
+      // Version advancement inside the same transaction: commits together,
+      // rolls back together if anything above throws.
+      await tx.setConfig('version', String(m.version));
+    });
+    return;
+  }
+
+  // Non-transactional path (CONCURRENTLY). SQL commits independently.
+  if (sql) {
+    await engine.withReservedConnection(async (conn) => {
+      try {
+        await conn.executeRaw("SET statement_timeout = '600000'");
+      } catch { /* non-fatal */ }
+      await conn.executeRaw(sql);
+    });
+  }
+  if (m.handler) {
+    await m.handler(engine);
+  }
+  if (m.verify) {
+    const ok = await m.verify(engine).catch(() => false);
+    if (!ok) {
+      throw new MigrationDriftError(
+        m.version,
+        m.name,
+        `Schema does not match expected post-condition. Run with --skip-verify to force.`,
+      );
+    }
+  }
+  // Version advances only after SQL + handler + verify succeed.
+  await engine.setConfig('version', String(m.version));
+}
+
+/**
  * Dedicated groundcontrol schema mode (2026-07): narrow per-migration variant
  * selection. Leaves every historical `Migration` object byte-identical; the
  * switch lives outside the registry so legacy brains see no change.
@@ -5975,83 +6055,101 @@ export async function runMigrations(engine: BrainEngine): Promise<{ applied: num
   for (const m of pending) {
     process.stderr.write(`  [${m.version}] ${m.name}...\n`);
 
-    // Pick SQL: engine-specific `sqlFor` wins over engine-agnostic `sql`.
-    // Dedicated groundcontrol mode (2026-07) narrows certain migrations via
-    // `selectMigrationSql`; legacy brains see byte-identical selection.
-    const sql = selectMigrationSql(m, engine);
-
-    if (sql) {
-      try {
-        // v0.30.1: retry wrapper handles statement_timeout + conn-reset
-        // across 3 attempts (5s/15s/45s). Other errors throw immediately.
-        await runMigrationSQLWithRetry(engine, m, sql);
-      } catch (err: unknown) {
-        // Actionable diagnostics for statement timeout (Postgres error 57014).
-        // Shape matches the 4-part error standard (what / why / fix / verify).
-        const code = (err as { code?: string })?.code;
-        if (code === '57014' || err instanceof MigrationRetryExhausted) {
-          console.error(`\n❌ Migration ${m.version} (${m.name}) ${err instanceof MigrationRetryExhausted ? 'exhausted retries' : 'hit statement_timeout (SQLSTATE 57014)'}.`);
-          if (err instanceof MigrationRetryExhausted && err.lastBlockers.length > 0) {
-            const b = err.lastBlockers[0];
-            console.error('');
-            console.error(`   Likely blocker: PID ${b.pid}, idle since ${b.query_start}`);
-            console.error(`   Query: ${b.query.slice(0, 120)}`);
-            console.error('');
-            console.error(`   Recovery: psql ... -c "SELECT pg_terminate_backend(${b.pid})"`);
-            console.error('');
-          } else {
-            console.error('');
-            console.error('   Cause: another connection holds a lock on the target table, or the');
-            console.error('   server statement_timeout (~2 min on Supabase) is too short for this DDL.');
-            console.error('');
-            console.error('   Fix:');
-            console.error('     1. gbrain doctor --locks    # find idle-in-transaction blockers');
-            console.error('     2. Terminate blocker(s) shown by step 1 via pg_terminate_backend(<pid>)');
-            console.error('     3. gbrain apply-migrations --yes  # re-run from the version that failed');
-            console.error('');
-          }
-          console.error('   Verify:');
-          console.error('     gbrain doctor              # schema_version should match latest');
+    // Task 6 (2026-07): run the complete attempt (SQL + handler + verify +
+    // version) inside one transactional boundary. The retry wrapper handles
+    // statement_timeout + conn-reset across 3 attempts (5s/15s/45s) and
+    // retries the WHOLE attempt, not just the SQL, so a transient failure
+    // during verify or version-commit re-runs cleanly. Other errors throw
+    // immediately. See `attemptMigration` for the per-migration contract.
+    try {
+      await runMigrationAttemptWithRetry(engine, m);
+    } catch (err: unknown) {
+      // Actionable diagnostics for statement timeout (Postgres error 57014).
+      // Shape matches the 4-part error standard (what / why / fix / verify).
+      const code = (err as { code?: string })?.code;
+      if (code === '57014' || err instanceof MigrationRetryExhausted) {
+        console.error(`\n❌ Migration ${m.version} (${m.name}) ${err instanceof MigrationRetryExhausted ? 'exhausted retries' : 'hit statement_timeout (SQLSTATE 57014)'}.`);
+        if (err instanceof MigrationRetryExhausted && err.lastBlockers.length > 0) {
+          const b = err.lastBlockers[0];
+          console.error('');
+          console.error(`   Likely blocker: PID ${b.pid}, idle since ${b.query_start}`);
+          console.error(`   Query: ${b.query.slice(0, 120)}`);
+          console.error('');
+          console.error(`   Recovery: psql ... -c "SELECT pg_terminate_backend(${b.pid})"`);
+          console.error('');
+        } else {
+          console.error('');
+          console.error('   Cause: another connection holds a lock on the target table, or the');
+          console.error('   server statement_timeout (~2 min on Supabase) is too short for this DDL.');
+          console.error('');
+          console.error('   Fix:');
+          console.error('     1. gbrain doctor --locks    # find idle-in-transaction blockers');
+          console.error('     2. Terminate blocker(s) shown by step 1 via pg_terminate_backend(<pid>)');
+          console.error('     3. gbrain apply-migrations --yes  # re-run from the version that failed');
           console.error('');
         }
-        throw err;
+        console.error('   Verify:');
+        console.error('     gbrain doctor              # schema_version should match latest');
+        console.error('');
       }
+      throw err;
     }
 
-    // Application-level handler (runs outside transaction for flexibility)
-    if (m.handler) {
-      await m.handler(engine);
-    }
-
-    // v0.30.1 (D6): post-condition probe. If a verify hook is declared, run
-    // it before bumping config.version. When verify returns false, check
-    // idempotent — if true, log + retry the same migration once; if false,
-    // throw MigrationDriftError so operator runs --skip-verify deliberately.
-    if (m.verify) {
-      const verifyOk = await m.verify(engine).catch(() => false);
-      if (!verifyOk) {
-        const idempotent = isMigrationIdempotent(m);
-        if (idempotent) {
-          console.warn(`  [${m.version}] ⚠️  verify failed; re-running idempotent migration once`);
-          if (sql) await runMigrationSQLWithRetry(engine, m, sql);
-          if (m.handler) await m.handler(engine);
-          // Best-effort: don't double-throw if second run still fails verify.
-          // Operator's next run of doctor will re-detect drift.
-        } else {
-          throw new MigrationDriftError(
-            m.version,
-            m.name,
-            `Schema does not match expected post-condition. Run with --skip-verify to force.`,
-          );
-        }
-      }
-    }
-
-    // Update version after both SQL and handler succeed
-    await engine.setConfig('version', String(m.version));
     process.stderr.write(`  [${m.version}] ✓ ${m.name}\n`);
     applied++;
   }
 
   return { applied, current: LATEST_VERSION };
+}
+
+/**
+ * Task 6 (2026-07): retry wrapper around the complete migration attempt.
+ * Retries the WHOLE attempt (SQL + handler + verify + version) on
+ * statement_timeout + conn-reset across 3 attempts (5s/15s/45s). Other
+ * errors throw immediately. Supersedes the SQL-only `runMigrationSQLWithRetry`
+ * for the `runMigrations` loop path; the legacy helper is retained for the
+ * verify-hook idempotent-retry single-shot path below.
+ */
+async function runMigrationAttemptWithRetry(engine: BrainEngine, m: Migration): Promise<void> {
+  const { isStatementTimeoutError, isRetryableConnError } = await import('./retry-matcher.ts');
+  const fastBackoff = process.env.GBRAIN_MIGRATE_BACKOFF_MS;
+  const backoffs = fastBackoff !== undefined
+    ? [parseInt(fastBackoff, 10) || 0, parseInt(fastBackoff, 10) || 0, parseInt(fastBackoff, 10) || 0]
+    : [5000, 15000, 45000];
+  let lastErr: Error | null = null;
+  let lastBlockers: IdleBlocker[] = [];
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      if (attempt > 0) {
+        lastBlockers = await getIdleBlockers(engine);
+        if (lastBlockers.length > 0) {
+          console.warn(`  [retry ${attempt}/3] ${lastBlockers.length} idle-in-transaction blocker(s):`);
+          for (const b of lastBlockers) {
+            console.warn(`    PID ${b.pid} idle since ${b.query_start} — ${b.query.slice(0, 80)}`);
+          }
+        }
+      }
+      await attemptMigration(engine, m);
+      return;
+    } catch (err: unknown) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+      // A MigrationDriftError (verify failed) is NOT retryable — re-running
+      // the same failed-verify migration won't fix the drift and would burn
+      // the retry budget without progress.
+      if (err instanceof MigrationDriftError) throw err;
+      const retryable = isStatementTimeoutError(err) || isRetryableConnError(err);
+      if (!retryable || attempt === 2) {
+        if (retryable) {
+          lastBlockers = await getIdleBlockers(engine);
+          throw new MigrationRetryExhausted(m.version, m.name, attempt + 1, lastBlockers, lastErr);
+        }
+        throw err;
+      }
+      const delay = backoffs[attempt];
+      console.warn(`  [retry ${attempt + 1}/3] ${m.name} hit ${lastErr.message.slice(0, 80)}; retrying in ${delay}ms`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  if (lastErr) throw lastErr;
 }
