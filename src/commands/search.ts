@@ -53,6 +53,7 @@ const KNOB_DESCRIPTIONS: Record<keyof ModeBundle, string> = {
   reranker_top_n_in: 'Candidates sent to reranker per call',
   reranker_top_n_out: 'Cap on reranked output (null = no truncate)',
   reranker_timeout_ms: 'HTTP timeout for the reranker call',
+  query_embed_timeout_ms: 'Wall-clock timeout for query embedding before keyword-only fallback',
   floor_ratio: 'Floor-ratio gate for metadata boosts (0..1, undefined = off)',
   title_boost: 'Title-phrase boost multiplier (query is a title token-run; 1.0 = off)',
   // v0.36 cross-modal knobs (D3 registry)
@@ -100,6 +101,7 @@ async function buildModesReport(engine: BrainEngine): Promise<SearchModesReport>
     'tokenBudget',
     'expansion',
     'searchLimit',
+    'query_embed_timeout_ms',
     // v0.35.6.0 — floor-ratio surfaced in `gbrain search modes` dashboard
     // so config drift is legible. Default undefined renders as 'undefined'
     // in the bundle column, 'mode' source when unset by config/per-call.

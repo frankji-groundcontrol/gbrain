@@ -63,6 +63,12 @@ describe('gbrain search modes (read-only dashboard)', () => {
     expect(report.bundles.balanced.searchLimit).toBe(25);
     expect(report.bundles.tokenmax.searchLimit).toBe(50);
     expect(report.resolved.tokenBudget.source).toBe('mode');
+    expect(report.resolved.query_embed_timeout_ms).toEqual({
+      value: 6000,
+      source: 'mode',
+      source_detail: 'mode: tokenmax',
+      description: 'Wall-clock timeout for query embedding before keyword-only fallback',
+    });
   });
 
   test('unset mode → balanced fallback with mode_valid=false', async () => {
