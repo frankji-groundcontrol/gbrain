@@ -1083,6 +1083,13 @@ async function initPostgres(opts: {
 
   console.log('Connecting to database...');
   const engine = await createEngine({ engine: 'postgres' });
+  // Dedicated groundcontrol schema mode (2026-07): resolve the file-plane
+  // startup field the same way as direct_database_url. Threaded into the
+  // connect call so the engine enters dedicated mode (preflight, dedicated
+  // rendering, final verification) BEFORE any DDL, and persisted into the
+  // saved config so subsequent invocations stay in dedicated mode.
+  const postgresSchema = process.env.GBRAIN_POSTGRES_SCHEMA
+    ?? loadConfigFileOnly()?.postgres_schema;
   try {
     try {
       await engine.connect({
@@ -1093,6 +1100,8 @@ async function initPostgres(opts: {
         // db.<ref>.supabase.co host and hangs on IPv6-hostile networks.
         direct_database_url:
           process.env.GBRAIN_DIRECT_DATABASE_URL ?? loadConfigFileOnly()?.direct_database_url,
+        // Dedicated mode: postgres_schema threaded by hand (same reason).
+        ...(postgresSchema ? { postgres_schema: postgresSchema as 'groundcontrol' } : {}),
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1186,6 +1195,10 @@ async function initPostgres(opts: {
       engine: 'postgres',
       database_url: databaseUrl,
       database_path: undefined, // clear any stale PGLite path
+      // Dedicated groundcontrol mode (2026-07): persist the file-plane field
+      // so subsequent invocations resolve the same schema. Cleared only when
+      // the operator explicitly removes it from config.json / env.
+      ...(postgresSchema ? { postgres_schema: postgresSchema as 'groundcontrol' } : {}),
       ...(opts.apiKey ? { openai_api_key: opts.apiKey } : {}),
       ...(opts.aiOpts?.noEmbedding
         ? { embedding_disabled: true }

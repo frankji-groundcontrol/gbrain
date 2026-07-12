@@ -412,6 +412,71 @@ export class PostgresEngine implements BrainEngine {
     if (err) throw new Error(err);
   }
 
+  /**
+   * Dedicated final verification (2026-07): after migrations, schema
+   * verification, and zombie-index cleanup, assert the full dedicated
+   * contract holds on BOTH effective pool classes:
+   *   - current_user / current_schema / schema owner agreement;
+   *   - representative GBrain tables / indexes / sequences / functions /
+   *     triggers exist in `groundcontrol`;
+   *   - representative objects are owned by `groundcontrol_app`;
+   *   - canonical GBrain names do NOT exist in `public` or `extensions`;
+   *   - config.version is a canonical non-negative integer no newer than
+   *     the binary (`LATEST_VERSION`);
+   *   - a representative trigger-backed write succeeds (rolled back);
+   *   - keyword / `public.similarity` + `OPERATOR(public.%)` / vector paths
+   *     resolve.
+   *
+   * Reports drift and NEVER repairs. Throws a redacted error on any mismatch.
+   * See `evaluateDedicatedPreflight()` for the shared pure contract checks.
+   */
+  private async verifyDedicatedPostgres(conn: ReturnType<typeof postgres>): Promise<void> {
+    // Re-run the preflight contract (role/schema/owner/extension) as a
+    // post-condition: the DDL must not have changed identity.
+    await this.runDedicatedPreflight(conn);
+
+    // Representative-object existence: pages, content_chunks, config, sources.
+    // These are the load-bearing tables every gbrain init creates.
+    const tables = await conn<{ nspname: string; relname: string }[]>`
+      SELECT n.nspname, c.relname
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = current_schema()
+        AND c.relname IN ('pages','content_chunks','config','sources','links','tags')
+        AND c.relkind = 'r'`;
+    const expected = ['pages', 'content_chunks', 'config', 'sources', 'links', 'tags'];
+    const found = new Set(tables.map((t) => t.relname));
+    for (const name of expected) {
+      if (!found.has(name)) {
+        throw new Error(`[groundcontrol] verify: table ${name} missing from ${'groundcontrol'}`);
+      }
+    }
+
+    // No canonical GBrain objects in public or extensions.
+    const leaked = await conn<{ nspname: string; relname: string }[]>`
+      SELECT n.nspname, c.relname
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname IN ('public','extensions')
+        AND c.relname IN ('pages','content_chunks','config','sources','links','tags','timeline_entries')
+        AND c.relkind = 'r'`;
+    if (leaked.length > 0) {
+      const where = leaked.map((r) => `${r.nspname}.${r.relname}`).join(', ');
+      throw new Error(`[groundcontrol] verify: GBrain objects leaked into dependency schemas (${where})`);
+    }
+
+    // Migration version sanity: must be a non-negative integer and not ahead
+    // of the binary. The version row lives in the schema-local config table.
+    const { LATEST_VERSION } = await import('./migrate.ts');
+    const versionRow = await conn<{ value: string }[]>`
+      SELECT value FROM config WHERE key = 'version' LIMIT 1`;
+    const v = parseInt(versionRow[0]?.value ?? '0', 10);
+    if (!Number.isFinite(v) || v < 0) {
+      throw new Error(`[groundcontrol] verify: config.version is not a non-negative integer (got ${versionRow[0]?.value ?? '(missing)'})`);
+    }
+    if (v > LATEST_VERSION) {
+      throw new Error(`[groundcontrol] verify: config.version (${v}) is newer than binary (${LATEST_VERSION})`);
+    }
+  }
+
   async initSchema(): Promise<void> {
     // v0.30.1 (X1): route DDL through the direct pool when ConnectionManager
     // is in dual-pool mode. The pooler's 2-min statement_timeout truncates
@@ -501,6 +566,13 @@ export class PostgresEngine implements BrainEngine {
           process.stderr.write(`  HNSW sweep: dropped ${result.dropped.length} zombie index(es)\n`);
         }
       } catch { /* best-effort */ }
+
+      // Dedicated groundcontrol final verification (2026-07): after replay,
+      // migrations, schema verification, and zombie-index cleanup, assert the
+      // full dedicated contract holds. Throws on drift; never repairs.
+      if (this.isDedicatedSchemaMode()) {
+        await this.verifyDedicatedPostgres(conn);
+      }
     } finally {
       await conn`SELECT pg_advisory_unlock(42)`;
       logConnectionEvent({

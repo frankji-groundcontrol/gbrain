@@ -98,6 +98,14 @@ export async function runMigrateEngine(sourceEngine: BrainEngine, args: string[]
     // initSchema's derived direct host can hang.
     targetConfig.direct_database_url =
       process.env.GBRAIN_DIRECT_DATABASE_URL ?? loadConfigFileOnly()?.direct_database_url;
+    // Dedicated groundcontrol schema mode (2026-07): same hand-threading as
+    // direct_database_url so the target engine enters dedicated mode before
+    // initSchema (preflight + final verification gate the schema).
+    const targetSchema = process.env.GBRAIN_POSTGRES_SCHEMA
+      ?? loadConfigFileOnly()?.postgres_schema;
+    if (targetSchema) {
+      targetConfig.postgres_schema = targetSchema as 'groundcontrol';
+    }
     if (!targetConfig.database_url) {
       console.error('Target is Supabase but no connection string provided. Use: --url <connection_string>');
       process.exit(1);
@@ -267,6 +275,19 @@ export async function runMigrateEngine(sourceEngine: BrainEngine, args: string[]
     if (val) await targetEngine.setConfig(key, val);
   }
 
+  // Dedicated groundcontrol schema mode (2026-07): verifyTarget runs BEFORE
+  // saveConfig / manifest clear / success output / source switch, and is
+  // STRICT (a failed probe keeps the old config + resume manifest). Legacy
+  // verification remains warning-only and runs after saveConfig.
+  const isDedicated = !!(targetEngine as BrainEngine & { isDedicatedSchemaMode?: () => boolean })
+    .isDedicatedSchemaMode?.();
+  if (isDedicated) {
+    console.log('\nVerifying dedicated target...');
+    // Throws on drift; the outer catch disconnects and rethrows so the old
+    // config + resume manifest survive.
+    await verifyTarget(targetEngine, sourceStats.page_count);
+  }
+
   // Update local config. v0.37 fix wave: preserve existing file-plane
   // embedding/expansion/chat config across the engine migration; only
   // the engine + connection target should change.
@@ -275,7 +296,12 @@ export async function runMigrateEngine(sourceEngine: BrainEngine, args: string[]
     ...existingFile,
     engine: opts.targetEngine,
     ...(opts.targetEngine === 'postgres'
-      ? { database_url: targetConfig.database_url, database_path: undefined }
+      ? {
+          database_url: targetConfig.database_url,
+          database_path: undefined,
+          // Dedicated mode persists the file-plane field.
+          ...(targetConfig.postgres_schema ? { postgres_schema: targetConfig.postgres_schema } : {}),
+        }
       : { database_path: targetConfig.database_path, database_url: undefined }),
   };
   saveConfig(newConfig);
@@ -289,15 +315,16 @@ export async function runMigrateEngine(sourceEngine: BrainEngine, args: string[]
     console.log(`Original PGLite brain preserved at ${config.database_path} (backup).`);
   }
 
-  // Post-migrate verification: confirm the target is healthy before we
-  // leave the user. Catches incomplete copies, schema drift, and missing
-  // embeddings immediately instead of on next CLI use. Non-fatal — prints
-  // warnings and keeps going so the user sees the full picture.
-  console.log('\nVerifying target...');
-  try {
-    await verifyTarget(targetEngine, sourceStats.page_count);
-  } catch (e) {
-    console.warn(`  Verification could not complete: ${e instanceof Error ? e.message : String(e)}`);
+  // Legacy post-migrate verification: warning-only. Catches incomplete copies,
+  // schema drift, and missing embeddings. Non-fatal — prints warnings and
+  // keeps going. Dedicated mode already ran a strict verify above.
+  if (!isDedicated) {
+    console.log('\nVerifying target...');
+    try {
+      await verifyTarget(targetEngine, sourceStats.page_count);
+    } catch (e) {
+      console.warn(`  Verification could not complete: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   await targetEngine.disconnect();
