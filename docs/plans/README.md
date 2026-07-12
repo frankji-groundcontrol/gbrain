@@ -15,5 +15,6 @@ plans belong outside the repo.
 
 | Plan | Status |
 |---|---|
+| [2026-07-12 — feat: dedicated groundcontrol Postgres schema mode](2026-07-12-groundcontrol-dedicated-schema.md) | in-progress |
 | [2026-07-03 — init modular doc record system + thin-router pass](2026-07-03-clean-repo-org-docs-init.md) | completed |
 | [2026-06-03 — feat: add idea-lineage thinking skill](2026-06-03-001-feat-idea-lineage-skill-plan.md) | completed |
