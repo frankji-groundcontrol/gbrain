@@ -22,6 +22,8 @@ import {
   DEDICATED_SEARCH_PATH,
   isDedicatedSchemaMode,
   normalizeDedicatedPostgresConfig,
+  evaluateDedicatedPreflight,
+  type DedicatedPreflightRow,
 } from '../src/core/postgres-dedicated.ts';
 import { loadConfig, toEngineConfig } from '../src/core/config.ts';
 import { withEnv } from './helpers/with-env.ts';
@@ -206,5 +208,134 @@ describe('normalizeDedicatedPostgresConfig — URL normalization', () => {
     });
     expect(out.database_url).toContain('sslmode=require');
     expect(out.database_url).toContain('search_path=groundcontrol,extensions');
+  });
+});
+
+/** Build a row that satisfies every preflight invariant. */
+function goodRow(overrides: Partial<DedicatedPreflightRow> = {}): DedicatedPreflightRow {
+  return {
+    current_user: 'groundcontrol_app',
+    current_schema: 'groundcontrol',
+    pg_version: 16,
+    schema_owner: 'groundcontrol_app',
+    has_connect: true,
+    has_usage_public: true,
+    has_usage_extensions: true,
+    can_create_public: false,
+    can_create_extensions: false,
+    has_create_groundcontrol: true,
+    rolsuper: false,
+    rolbypassrls: false,
+    rolcreatedb: false,
+    rolcreaterole: false,
+    rolreplication: false,
+    ...overrides,
+  };
+}
+
+const GOOD_EXTENSIONS = [
+  { extname: 'vector', schema: 'extensions' },
+  { extname: 'pg_trgm', schema: 'public' },
+];
+
+describe('evaluateDedicatedPreflight — contract checks', () => {
+  test('happy path returns null', () => {
+    expect(evaluateDedicatedPreflight(goodRow(), GOOD_EXTENSIONS)).toBeNull();
+  });
+
+  test('rejects wrong current_user', () => {
+    expect(evaluateDedicatedPreflight(goodRow({ current_user: 'postgres' }), GOOD_EXTENSIONS)).toMatch(/current_user/);
+  });
+
+  test('rejects wrong current_schema', () => {
+    expect(evaluateDedicatedPreflight(goodRow({ current_schema: 'public' }), GOOD_EXTENSIONS)).toMatch(/current_schema/);
+  });
+
+  test('rejects schema not owned by role', () => {
+    expect(evaluateDedicatedPreflight(goodRow({ schema_owner: 'postgres' }), GOOD_EXTENSIONS)).toMatch(/owned/);
+  });
+
+  test('rejects PostgreSQL below 13', () => {
+    expect(evaluateDedicatedPreflight(goodRow({ pg_version: 12 }), GOOD_EXTENSIONS)).toMatch(/PostgreSQL 13/);
+  });
+
+  test('rejects missing CONNECT', () => {
+    expect(evaluateDedicatedPreflight(goodRow({ has_connect: false }), GOOD_EXTENSIONS)).toMatch(/CONNECT/);
+  });
+
+  test('rejects missing USAGE on public', () => {
+    expect(evaluateDedicatedPreflight(goodRow({ has_usage_public: false }), GOOD_EXTENSIONS)).toMatch(/USAGE on public/);
+  });
+
+  test('rejects missing USAGE on extensions', () => {
+    expect(evaluateDedicatedPreflight(goodRow({ has_usage_extensions: false }), GOOD_EXTENSIONS)).toMatch(/USAGE on extensions/);
+  });
+
+  test('rejects CREATE on public', () => {
+    expect(evaluateDedicatedPreflight(goodRow({ can_create_public: true }), GOOD_EXTENSIONS)).toMatch(/CREATE on public/);
+  });
+
+  test('rejects CREATE on extensions', () => {
+    expect(evaluateDedicatedPreflight(goodRow({ can_create_extensions: true }), GOOD_EXTENSIONS)).toMatch(/CREATE on extensions/);
+  });
+
+  test('rejects missing CREATE on groundcontrol', () => {
+    expect(evaluateDedicatedPreflight(goodRow({ has_create_groundcontrol: false }), GOOD_EXTENSIONS)).toMatch(/CREATE on groundcontrol/);
+  });
+
+  test('rejects superuser', () => {
+    expect(evaluateDedicatedPreflight(goodRow({ rolsuper: true }), GOOD_EXTENSIONS)).toMatch(/superuser/);
+  });
+
+  test('rejects BYPASSRLS', () => {
+    expect(evaluateDedicatedPreflight(goodRow({ rolbypassrls: true }), GOOD_EXTENSIONS)).toMatch(/BYPASSRLS/);
+  });
+
+  test('rejects CREATEDB', () => {
+    expect(evaluateDedicatedPreflight(goodRow({ rolcreatedb: true }), GOOD_EXTENSIONS)).toMatch(/CREATEDB/);
+  });
+
+  test('rejects CREATEROLE', () => {
+    expect(evaluateDedicatedPreflight(goodRow({ rolcreaterole: true }), GOOD_EXTENSIONS)).toMatch(/CREATEROLE/);
+  });
+
+  test('rejects REPLICATION', () => {
+    expect(evaluateDedicatedPreflight(goodRow({ rolreplication: true }), GOOD_EXTENSIONS)).toMatch(/REPLICATION/);
+  });
+
+  test('rejects vector missing', () => {
+    expect(evaluateDedicatedPreflight(goodRow(), [{ extname: 'pg_trgm', schema: 'public' }])).toMatch(/vector/);
+  });
+
+  test('rejects vector in wrong schema', () => {
+    expect(
+      evaluateDedicatedPreflight(goodRow(), [
+        { extname: 'vector', schema: 'public' },
+        { extname: 'pg_trgm', schema: 'public' },
+      ]),
+    ).toMatch(/vector/);
+  });
+
+  test('rejects pg_trgm missing', () => {
+    expect(evaluateDedicatedPreflight(goodRow(), [{ extname: 'vector', schema: 'extensions' }])).toMatch(/pg_trgm/);
+  });
+
+  test('rejects pg_trgm in wrong schema', () => {
+    expect(
+      evaluateDedicatedPreflight(goodRow(), [
+        { extname: 'vector', schema: 'extensions' },
+        { extname: 'pg_trgm', schema: 'extensions' },
+      ]),
+    ).toMatch(/pg_trgm/);
+  });
+
+  test('errors are redacted (no raw credential leak)', () => {
+    // Even if a field somehow carried a URL, the redactor strips it.
+    const msg = evaluateDedicatedPreflight(
+      goodRow({ current_user: 'postgresql://user:pass@host:5432/db' }),
+      GOOD_EXTENSIONS,
+    );
+    expect(msg).not.toContain('user:pass');
+    expect(msg).not.toContain('host:5432');
   });
 });

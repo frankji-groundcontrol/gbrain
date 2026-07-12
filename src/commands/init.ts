@@ -1103,7 +1103,11 @@ async function initPostgres(opts: {
       throw e;
     }
 
-    // Check and auto-create pgvector extension
+    // Check and auto-create pgvector extension. Dedicated groundcontrol mode
+    // (2026-07) requires extensions to be pre-provisioned by the operator
+    // (the restricted role has no CREATE on dependency schemas and preflight
+    // already enforced placement), so skip this block entirely there.
+    if (!(engine as any).isDedicatedSchemaMode?.()) {
     try {
       const conn = (engine as any).sql || (await import('../core/db.ts')).getConnection();
       const ext = await conn`SELECT extname FROM pg_extension WHERE extname = 'vector'`;
@@ -1122,6 +1126,7 @@ async function initPostgres(opts: {
     } catch {
       // Non-fatal
     }
+    } // end dedicated-mode pgvector skip
 
     // v0.28.5 (A4) + v0.37.11.0 Lane B.5: refuse to silently re-template an
     // existing brain with a mismatched embedding dimension. Mirror of the

@@ -144,3 +144,84 @@ export function normalizeDedicatedPostgresConfig<C extends DedicatedEngineConfig
     : config.direct_database_url;
   return { ...config, database_url, direct_database_url };
 }
+
+/**
+ * Contract row returned by the dedicated preflight catalog probe. Every field
+ * is asserted by {@link evaluateDedicatedPreflight}; a mismatch yields a
+ * redacted, human-readable error naming the violated invariant.
+ */
+export interface DedicatedPreflightRow {
+  current_user: string;
+  current_schema: string;
+  pg_version: number;
+  schema_owner: string | null;
+  has_connect: boolean;
+  has_usage_public: boolean;
+  has_usage_extensions: boolean;
+  can_create_public: boolean;
+  can_create_extensions: boolean;
+  has_create_groundcontrol: boolean;
+  rolsuper: boolean;
+  rolbypassrls: boolean;
+  rolcreatedb: boolean;
+  rolcreaterole: boolean;
+  rolreplication: boolean;
+}
+
+/** Extension placement row from the preflight probe. */
+export interface DedicatedPreflightExtension {
+  extname: string;
+  schema: string;
+}
+
+/**
+ * Required extension placement for dedicated mode.
+ * `vector` must live in `extensions`; `pg_trgm` must live in `public`.
+ */
+export const DEDICATED_EXTENSION_PLACEMENT: Record<string, string> = {
+  vector: 'extensions',
+  pg_trgm: 'public',
+};
+
+/**
+ * Pure evaluator for the dedicated preflight catalog snapshot. Takes the row
+ * returned by the catalog probe + the extension-placement rows and returns
+ * `null` when the contract holds, or a redacted error string when it doesn't.
+ *
+ * Extracted as a pure function so the full contract is unit-testable with
+ * fakes (no real Postgres needed). The engine method
+ * `PostgresEngine.runDedicatedPreflight()` runs the catalog probe and calls
+ * this; on a non-null return it throws.
+ */
+export function evaluateDedicatedPreflight(
+  r: DedicatedPreflightRow,
+  extensions: DedicatedPreflightExtension[],
+): string | null {
+  const checks: [boolean, string][] = [
+    [r.current_user === 'groundcontrol_app', 'current_user must be groundcontrol_app'],
+    [r.current_schema === DEDICATED_SCHEMA, `current_schema must be ${DEDICATED_SCHEMA}`],
+    [r.schema_owner === 'groundcontrol_app', `${DEDICATED_SCHEMA} must be owned by groundcontrol_app`],
+    [r.pg_version >= 13, 'PostgreSQL 13+ required'],
+    [r.has_connect, 'role lacks CONNECT'],
+    [r.has_usage_public, 'role lacks USAGE on public'],
+    [r.has_usage_extensions, 'role lacks USAGE on extensions'],
+    [!r.can_create_public, 'role must not have CREATE on public'],
+    [!r.can_create_extensions, 'role must not have CREATE on extensions'],
+    [r.has_create_groundcontrol, `role lacks CREATE on ${DEDICATED_SCHEMA}`],
+    [!r.rolsuper, 'role must not be superuser'],
+    [!r.rolbypassrls, 'role must not have BYPASSRLS'],
+    [!r.rolcreatedb, 'role must not have CREATEDB'],
+    [!r.rolcreaterole, 'role must not have CREATEROLE'],
+    [!r.rolreplication, 'role must not have REPLICATION'],
+  ];
+  for (const [ok, msg] of checks) {
+    if (!ok) return `[groundcontrol] preflight: ${redactConnectionInfo(msg)}`;
+  }
+  for (const [extname, requiredSchema] of Object.entries(DEDICATED_EXTENSION_PLACEMENT)) {
+    const found = extensions.find((e) => e.extname === extname);
+    if (!found || found.schema !== requiredSchema) {
+      return `[groundcontrol] preflight: ${extname} must be in ${requiredSchema}`;
+    }
+  }
+  return null;
+}

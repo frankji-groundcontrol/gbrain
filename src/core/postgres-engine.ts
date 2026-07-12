@@ -282,6 +282,78 @@ export class PostgresEngine implements BrainEngine {
     // else: nothing to disconnect (already done or never connected)
   }
 
+  /**
+   * Dedicated groundcontrol schema mode predicate (2026-07). True when the
+   * resolved config captured at connect() carries `postgres_schema: 'groundcontrol'`.
+   */
+  isDedicatedSchemaMode(): boolean {
+    return this._savedConfig?.postgres_schema === 'groundcontrol';
+  }
+
+  /**
+   * Dedicated preflight (2026-07): run one bounded catalog round trip on the
+   * given pool and assert the role/schema/ownership/extension contract BEFORE
+   * any application DDL. Throws a redacted error on any mismatch. See
+   * `evaluateDedicatedPreflight()` in `postgres-dedicated.ts` for the pure
+   * decision logic (unit-tested with fakes).
+   */
+  private async runDedicatedPreflight(conn: ReturnType<typeof postgres>): Promise<void> {
+    const rows = await conn<{
+      current_user: string; current_schema: string; pg_version: number;
+      schema_owner: string | null; has_connect: boolean;
+      has_usage_public: boolean; has_usage_extensions: boolean;
+      can_create_public: boolean; can_create_extensions: boolean;
+      has_create_groundcontrol: boolean;
+      rolsuper: boolean; rolbypassrls: boolean; rolcreatedb: boolean;
+      rolcreaterole: boolean; rolreplication: boolean;
+    }[]>`
+      SELECT
+        current_user,
+        current_schema() AS current_schema,
+        (regexp_split_to_array(current_setting('server_version'), '\.'))[1]::int AS pg_version,
+        (SELECT rolname FROM pg_namespace n JOIN pg_roles r ON r.oid = n.nspowner WHERE n.nspname = 'groundcontrol') AS schema_owner,
+        has_database_privilege(current_database(), 'CONNECT') AS has_connect,
+        has_schema_privilege(current_user, 'public', 'USAGE') AS has_usage_public,
+        has_schema_privilege(current_user, 'extensions', 'USAGE') AS has_usage_extensions,
+        has_schema_privilege(current_user, 'public', 'CREATE') AS can_create_public,
+        has_schema_privilege(current_user, 'extensions', 'CREATE') AS can_create_extensions,
+        has_schema_privilege(current_user, 'groundcontrol', 'CREATE') AS has_create_groundcontrol,
+        rolsuper, rolbypassrls, rolcreatedb, rolcreaterole, rolreplication
+      FROM pg_roles WHERE rolname = current_user
+      LIMIT 1
+    `;
+    if (rows.length === 0) {
+      throw new Error('[groundcontrol] preflight: current role not found in pg_roles');
+    }
+    const ext = await conn<{ extname: string; schema: string }[]>`
+      SELECT e.extname, n.nspname AS schema
+      FROM pg_extension e JOIN pg_namespace n ON e.extnamespace = n.oid
+      WHERE e.extname IN ('vector', 'pg_trgm')`;
+    const { evaluateDedicatedPreflight } = await import('./postgres-dedicated.ts');
+    const r = rows[0]!;
+    const err = evaluateDedicatedPreflight(
+      {
+        current_user: r.current_user,
+        current_schema: r.current_schema,
+        pg_version: r.pg_version,
+        schema_owner: r.schema_owner,
+        has_connect: r.has_connect,
+        has_usage_public: r.has_usage_public,
+        has_usage_extensions: r.has_usage_extensions,
+        can_create_public: r.can_create_public,
+        can_create_extensions: r.can_create_extensions,
+        has_create_groundcontrol: r.has_create_groundcontrol,
+        rolsuper: r.rolsuper,
+        rolbypassrls: r.rolbypassrls,
+        rolcreatedb: r.rolcreatedb,
+        rolcreaterole: r.rolcreaterole,
+        rolreplication: r.rolreplication,
+      },
+      ext.map((e) => ({ extname: e.extname, schema: e.schema })),
+    );
+    if (err) throw new Error(err);
+  }
+
   async initSchema(): Promise<void> {
     // v0.30.1 (X1): route DDL through the direct pool when ConnectionManager
     // is in dual-pool mode. The pooler's 2-min statement_timeout truncates
@@ -292,6 +364,18 @@ export class PostgresEngine implements BrainEngine {
     const conn = this.connectionManager
       ? await this.connectionManager.ddl()
       : this.sql;
+
+    // Dedicated groundcontrol schema mode (2026-07): preflight EVERY distinct
+    // pool before advisory lock, bootstrap, schema replay, or migrations. On
+    // failure, zero application DDL runs. Deduplicate by object identity —
+    // the read pool and DDL pool may be the same object in single-pool mode.
+    if (this.isDedicatedSchemaMode()) {
+      await this.runDedicatedPreflight(conn);
+      const readPool = this.connectionManager?.peekReadPool();
+      if (readPool && readPool !== (conn as unknown)) {
+        await this.runDedicatedPreflight(readPool);
+      }
+    }
 
     // Resolve the embedding dim/model from the gateway. v0.37 fix wave:
     // fallbacks track the canonical defaults in `ai/defaults.ts` instead of
