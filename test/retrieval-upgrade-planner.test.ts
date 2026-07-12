@@ -6,6 +6,8 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 import {
@@ -437,5 +439,17 @@ describe('undoRetrievalUpgrade (D16)', () => {
     if (result.status === 'failed') {
       expect(result.reason).toContain('corrupt');
     }
+  });
+});
+
+// 2026-07 dedicated groundcontrol schema mode: the image-column probe must
+// scope by current_schema(), NOT a literal 'public'. A dedicated brain owns
+// content_chunks in groundcontrol; a literal-public probe would never find
+// the column and the image HNSW index would silently never recreate.
+describe('retrieval-upgrade-planner — namespace-scope probes (2026-07)', () => {
+  test('image-column probe uses current_schema(), not literal public', () => {
+    const src = readFileSync(join(import.meta.dir, '../src/core/retrieval-upgrade-planner.ts'), 'utf8');
+    expect(src).not.toMatch(/table_schema\s*=\s*'public'/);
+    expect(src).toMatch(/table_schema\s*=\s*current_schema\(\)/);
   });
 });

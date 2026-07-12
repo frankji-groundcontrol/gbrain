@@ -582,7 +582,7 @@ async function runSchemaTransition(engine: BrainEngine, targetDim: number): Prom
     const hasImageCol = await tx.executeRaw<{ exists: boolean }>(
       `SELECT EXISTS (
          SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'public'
+         WHERE table_schema = current_schema()
            AND table_name = 'content_chunks'
            AND column_name = 'embedding_image'
        ) AS exists`,
