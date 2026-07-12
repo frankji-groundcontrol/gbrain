@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { buildLlmsFiles } from "../scripts/build-llms";
-import { SECTIONS, FULL_SIZE_BUDGET } from "../scripts/llms-config";
+import { PROJECT, SECTIONS, FULL_SIZE_BUDGET } from "../scripts/llms-config";
 
 const repoRoot = join(import.meta.dir, "..");
 
@@ -31,6 +31,13 @@ describe("build-llms generator", () => {
     const second = buildLlmsFiles();
     expect(second.llmsTxt).toBe(first.llmsTxt);
     expect(second.llmsFullTxt).toBe(first.llmsFullTxt);
+  });
+
+  test("this fork defaults generated source links to frankji-groundcontrol/franky", () => {
+    expect(PROJECT.repoUrl).toBe("https://github.com/frankji-groundcontrol/gbrain");
+    expect(PROJECT.rawBaseUrl).toBe(
+      "https://raw.githubusercontent.com/frankji-groundcontrol/gbrain/franky",
+    );
   });
 
   // Case 3 — llms.txt spec shape per llmstxt.org: H1 + blockquote + required H2s.

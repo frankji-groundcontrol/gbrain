@@ -57,9 +57,13 @@ The regression test was observed failing before the fix because
 was offered but interrupted before execution, so this record does not claim that
 gate passed.
 
-Final topology after pushing to the fork:
+Topology immediately after the sync merge was pushed:
 
 ```text
 origin/master   a25209bb == upstream/master
 origin/franky   8a9aa131 (15 commits ahead, 0 behind origin/master)
 ```
+
+The documentation commit that added this record then advanced `origin/franky` to
+`f3a2adf2` (16 commits ahead, 0 behind). These hashes are point-in-time receipts,
+not a promise that the branch tips remain unchanged.

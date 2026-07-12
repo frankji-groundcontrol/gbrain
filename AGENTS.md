@@ -149,17 +149,28 @@ upstream/master (garrytan/gbrain, fetch only)
 ```
 
 ```bash
-git remote set-url origin https://github.com/frankji-groundcontrol/gbrain.git
-git remote get-url upstream >/dev/null 2>&1 \
-  && git remote set-url upstream https://github.com/garrytan/gbrain.git \
-  || git remote add upstream https://github.com/garrytan/gbrain.git
-git remote set-url --push upstream DISABLED
-git fetch upstream --prune
-git push origin upstream/master:master
-git fetch origin --prune
-git switch franky
-git merge --no-edit origin/master
-git push origin franky
+(
+  set -e
+  git config --unset-all remote.origin.pushurl 2>/dev/null || true
+  git remote set-url origin https://github.com/frankji-groundcontrol/gbrain.git
+  git remote set-url --add --push origin https://github.com/frankji-groundcontrol/gbrain.git
+  git remote get-url upstream >/dev/null 2>&1 \
+    && git remote set-url upstream https://github.com/garrytan/gbrain.git \
+    || git remote add upstream https://github.com/garrytan/gbrain.git
+  git config --unset-all remote.upstream.pushurl 2>/dev/null || true
+  git remote set-url --add --push upstream DISABLED
+  git fetch upstream --prune
+  git fetch origin --prune
+  git merge-base --is-ancestor origin/master upstream/master || {
+    printf '%s\n' 'origin/master has fork-only commits; reconcile it before syncing' >&2
+    exit 1
+  }
+  git push origin upstream/master:master
+  git fetch origin --prune
+  git switch franky
+  git merge --no-edit origin/master
+  git push origin franky
+)
 ```
 
 When the merge conflicts, save the resolution record before finishing:
