@@ -345,14 +345,14 @@ async function tryFuzzyMatch(
     const rows = await engine.executeRaw<{ slug: string; title: string; score: number }>(
       `SELECT slug, title,
          GREATEST(
-           similarity(lower(title), $2),
-           similarity(slug, $3)
+           public.similarity(lower(title), $2),
+           public.similarity(slug, $3)
          ) AS score
        FROM pages
        WHERE source_id = $1
          AND deleted_at IS NULL
          AND (
-           lower(title) % $2
+           lower(title) OPERATOR(public.%) $2
            OR slug ILIKE '%' || $3 || '%'
          )
        ORDER BY score DESC, slug ASC

@@ -73,16 +73,74 @@ function escapeSqlStringLiteral(value: string): string {
 export function getPostgresSchema(
   dims: number = DEFAULT_EMBEDDING_DIMENSIONS,
   model: string = DEFAULT_EMBEDDING_MODEL,
+  opts?: { dedicated?: boolean },
 ): string {
   const parsedDims = Number(dims);
   if (!Number.isInteger(parsedDims) || parsedDims <= 0) {
     throw new Error(`Invalid embedding dimensions: ${dims}`);
   }
   const sanitizedModel = escapeSqlStringLiteral(String(model));
-  return applyChunkEmbeddingIndexPolicy(SCHEMA_SQL, parsedDims)
+  let out = applyChunkEmbeddingIndexPolicy(SCHEMA_SQL, parsedDims)
     .replace(/vector\(1536\)/g, `vector(${parsedDims})`)
     .replace(/'text-embedding-3-large'/g, `'${sanitizedModel}'`)
     .replace(/\('embedding_dimensions', '1536'\)/g, `('embedding_dimensions', '${parsedDims}')`);
+  if (opts?.dedicated) {
+    out = stripCreateExtensionsForDedicated(out);
+    out = stripRlsBlockForDedicated(out);
+  }
+  return out;
+}
+
+/**
+ * Dedicated groundcontrol rendering (2026-07): strip the three leading
+ * `CREATE EXTENSION IF NOT EXISTS` statements. The restricted role has no
+ * CREATE on dependency schemas; extensions are pre-provisioned by the
+ * operator and placement is enforced by the preflight. Fail-loud: if the
+ * known block shape isn't found, this is a no-op so a silent schema change
+ * can't ship a half-stripped bootstrap.
+ */
+function stripCreateExtensionsForDedicated(sql: string): string {
+  // Exact known block. Located (not start-anchored) so the leading file
+  // comment doesn't break the match, but we require the block to appear
+  // before any CREATE TABLE to avoid sweeping a hypothetical mid-schema
+  // extension create.
+  const block =
+    'CREATE EXTENSION IF NOT EXISTS vector;\n' +
+    'CREATE EXTENSION IF NOT EXISTS pg_trgm;\n' +
+    '-- gen_random_uuid() is core in Postgres 13+; enable pgcrypto as fallback for older versions\n' +
+    'CREATE EXTENSION IF NOT EXISTS pgcrypto;\n';
+  const idx = sql.indexOf(block);
+  if (idx === -1) return sql;
+  const firstCreateTable = sql.indexOf('CREATE TABLE');
+  if (firstCreateTable !== -1 && idx > firstCreateTable) return sql;
+  return sql.slice(0, idx) + sql.slice(idx + block.length);
+}
+
+/**
+ * Dedicated groundcontrol rendering (2026-07): strip the terminal RLS DO $$
+ * block. Dedicated mode uses a restricted role with NOBYPASSRLS, so the
+ * block is a no-op there (the ELSE branch fires) and the public-facing RLS
+ * policy belongs to the operator, not the application schema. Fail-loud:
+ * only strips the exact known block; a shape change leaves it in place.
+ */
+function stripRlsBlockForDedicated(sql: string): string {
+  // The block runs from the explanatory comment to the closing END $$;.
+  const startMarker = '-- The postgres role (used by gbrain via pooler) has BYPASSRLS.';
+  const startIdx = sql.indexOf(startMarker);
+  if (startIdx === -1) return sql;
+  const endMarker = 'END $$;';
+  const endIdx = sql.indexOf(endMarker, startIdx);
+  if (endIdx === -1) return sql;
+  // Include the trailing newline after END $$; if present.
+  const afterEnd = endIdx + endMarker.length;
+  const trailingNewline = sql.charAt(afterEnd) === '\n' ? afterEnd + 1 : afterEnd;
+  // Strip the block plus any preceding blank line so the schema doesn't end
+  // in a dangling blank.
+  let cutStart = startIdx;
+  while (cutStart > 0 && (sql.charAt(cutStart - 1) === '\n' || sql.charAt(cutStart - 1) === '\r')) {
+    cutStart--;
+  }
+  return (sql.slice(0, cutStart) + '\n' + sql.slice(trailingNewline)).replace(/\n{3,}/g, '\n\n');
 }
 
 // CONNECTION_ERROR_PATTERNS / isConnectionError were used by the per-call
@@ -390,7 +448,7 @@ export class PostgresEngine implements BrainEngine {
       model = gw.getEmbeddingModel() || model;
     } catch { /* gateway not yet configured — use defaults */ }
 
-    const sqlText = getPostgresSchema(dims, model);
+    const sqlText = getPostgresSchema(dims, model, { dedicated: this.isDedicatedSchemaMode() });
 
     // Advisory lock prevents concurrent initSchema() calls from deadlocking
     // on DDL statements (DROP TRIGGER + CREATE TRIGGER acquire AccessExclusiveLock).
@@ -1611,11 +1669,12 @@ export class PostgresEngine implements BrainEngine {
     const exact = await sql`SELECT slug FROM pages WHERE slug = ${partial} AND deleted_at IS NULL${scopeFragment}`;
     if (exact.length > 0) return [exact[0].slug];
 
-    // Fuzzy match via pg_trgm
+    // Fuzzy match via pg_trgm. Qualify public.similarity / OPERATOR(public.%)
+    // so dedicated mode (public off the search path) resolves the same ops.
     const fuzzy = await sql`
-      SELECT slug, similarity(title, ${partial}) AS sim
+      SELECT slug, public.similarity(title, ${partial}) AS sim
       FROM pages
-      WHERE deleted_at IS NULL AND (title % ${partial} OR slug ILIKE ${'%' + partial + '%'})${scopeFragment}
+      WHERE deleted_at IS NULL AND (title OPERATOR(public.%) ${partial} OR slug ILIKE ${'%' + partial + '%'})${scopeFragment}
       ORDER BY sim DESC
       LIMIT 5
     `;
@@ -2883,9 +2942,9 @@ export class PostgresEngine implements BrainEngine {
     // in put_page auto-link reconciliation).
     const prefixPattern = dirPrefix ? `${dirPrefix}/%` : '%';
     const rows = await sql`
-      SELECT slug, similarity(title, ${name}) AS sim
+      SELECT slug, public.similarity(title, ${name}) AS sim
       FROM pages
-      WHERE similarity(title, ${name}) >= ${minSimilarity}
+      WHERE public.similarity(title, ${name}) >= ${minSimilarity}
         AND slug LIKE ${prefixPattern}
       ORDER BY sim DESC, slug ASC
       LIMIT 1
@@ -4692,11 +4751,11 @@ export class PostgresEngine implements BrainEngine {
     const rows = await sql`
       SELECT t.id AS take_id, t.page_id, p.slug AS page_slug, t.row_num,
              t.claim, t.kind, t.holder, t.weight,
-             similarity(t.claim, ${query})::real AS score
+             public.similarity(t.claim, ${query})::real AS score
       FROM takes t
       JOIN pages p ON p.id = t.page_id
       WHERE t.active
-        AND t.claim % ${query}
+        AND t.claim OPERATOR(public.%) ${query}
         AND (
           ${opts.takesHoldersAllowList ?? null}::text[] IS NULL
           OR t.holder = ANY(${opts.takesHoldersAllowList ?? null}::text[])

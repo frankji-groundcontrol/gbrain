@@ -1,4 +1,6 @@
 import { describe, test, expect } from 'bun:test';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { getPGLiteSchema, PGLITE_SCHEMA_SQL } from '../../src/core/pglite-schema.ts';
 import { getPostgresSchema } from '../../src/core/postgres-engine.ts';
 
@@ -61,5 +63,84 @@ describe('getPostgresSchema', () => {
     const sql = getPostgresSchema(1024, "voyage-weird'quoted");
     expect(sql).toContain("'voyage-weird''quoted'");
     expect(sql).not.toContain("'voyage-weird'quoted'");
+  });
+});
+
+describe('getPostgresSchema — dedicated groundcontrol rendering (2026-07)', () => {
+  test('dedicated mode strips CREATE EXTENSION statements', () => {
+    const sql = getPostgresSchema(1280, 'zeroentropyai:zembed-1', { dedicated: true });
+    expect(sql).not.toMatch(/CREATE EXTENSION IF NOT EXISTS vector/);
+    expect(sql).not.toMatch(/CREATE EXTENSION IF NOT EXISTS pg_trgm/);
+    expect(sql).not.toMatch(/CREATE EXTENSION IF NOT EXISTS pgcrypto/);
+  });
+
+  test('dedicated mode strips the terminal RLS DO block', () => {
+    const sql = getPostgresSchema(1280, 'zeroentropyai:zembed-1', { dedicated: true });
+    expect(sql).not.toMatch(/ENABLE ROW LEVEL SECURITY/);
+    expect(sql).not.toMatch(/has_bypass/);
+  });
+
+  test('dedicated mode retains SET search_path FROM CURRENT functions', () => {
+    const sql = getPostgresSchema(1280, 'zeroentropyai:zembed-1', { dedicated: true });
+    expect(sql).toMatch(/SET search_path FROM CURRENT/);
+  });
+
+  test('dedicated mode retains core GBrain DDL (pages table, content_chunks)', () => {
+    const sql = getPostgresSchema(1280, 'zeroentropyai:zembed-1', { dedicated: true });
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS pages/);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS content_chunks/);
+  });
+
+  test('dedicated mode qualifies gin_trgm_ops as public.gin_trgm_ops', () => {
+    const sql = getPostgresSchema(1280, 'zeroentropyai:zembed-1', { dedicated: true });
+    expect(sql).toMatch(/public\.gin_trgm_ops/);
+    // No unqualified gin_trgm_ops remains.
+    expect(sql).not.toMatch(/[^.]gin_trgm_ops/);
+  });
+
+  test('legacy mode also qualifies gin_trgm_ops (opclass qualification is unconditional)', () => {
+    const sql = getPostgresSchema(1280, 'zeroentropyai:zembed-1');
+    expect(sql).toMatch(/public\.gin_trgm_ops/);
+  });
+
+  test('legacy mode retains CREATE EXTENSION + RLS (byte-compatible apart from opclass)', () => {
+    const sql = getPostgresSchema(1280, 'zeroentropyai:zembed-1');
+    expect(sql).toMatch(/CREATE EXTENSION IF NOT EXISTS vector/);
+    expect(sql).toMatch(/ENABLE ROW LEVEL SECURITY/);
+  });
+});
+
+describe('runtime trigram qualification (2026-07)', () => {
+  // Strip //-comment and *-comment lines so the invariant checks see real
+  // SQL/code only — comments legitimately mention the bare function names.
+  function stripComments(src: string): string {
+    return src
+      .replace(/^\s*\/\/.*$/gm, '')
+      .replace(/^\s*\*.*$/gm, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+  }
+
+  test('postgres-engine qualifies similarity and % operator', () => {
+    const raw = readFileSync(join(import.meta.dir, '../../src/core/postgres-engine.ts'), 'utf8');
+    const src = stripComments(raw);
+    // Every similarity( call is qualified as public.similarity(
+    expect(src).toMatch(/public\.similarity\(/);
+    expect(src).not.toMatch(/[^.]similarity\(/);
+    // Every % trigram operator uses OPERATOR(public.%)
+    expect(src).toMatch(/OPERATOR\(public\.%\)/);
+  });
+
+  test('schema.sql qualifies gin_trgm_ops', () => {
+    const src = readFileSync(join(import.meta.dir, '../../src/schema.sql'), 'utf8');
+    expect(src).toMatch(/public\.gin_trgm_ops/);
+    expect(src).not.toMatch(/[^.]gin_trgm_ops/);
+  });
+
+  test('entities/resolve qualifies similarity and % operator', () => {
+    const raw = readFileSync(join(import.meta.dir, '../../src/core/entities/resolve.ts'), 'utf8');
+    const src = stripComments(raw);
+    expect(src).toMatch(/public\.similarity\(/);
+    expect(src).not.toMatch(/[^.]similarity\(/);
+    expect(src).toMatch(/OPERATOR\(public\.%\)/);
   });
 });
