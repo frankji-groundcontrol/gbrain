@@ -42,6 +42,15 @@ describe('ConnectionManager directUrl precedence', () => {
     expect(cm.resolveDirectUrl()).toBe(SESSION_URL);
   });
 
+  test('dedicated mode rejects a conflicting env direct URL before pool construction', () => {
+    process.env.GBRAIN_DIRECT_DATABASE_URL =
+      'postgresql://u:p@h:5432/db?search_path=public';
+    expect(() => new ConnectionManager({
+      url: POOLER_URL,
+      postgresSchema: 'groundcontrol',
+    })).toThrow('search_path must be exactly "groundcontrol,extensions"');
+  });
+
   test('falls back to derived direct URL when neither opts nor env set', () => {
     delete process.env.GBRAIN_DIRECT_DATABASE_URL;
     const cm = new ConnectionManager({ url: POOLER_URL });

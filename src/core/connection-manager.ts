@@ -226,16 +226,16 @@ export class ConnectionManager {
       // directly still fail closed on a conflicting search_path. The
       // normalized primary URL replaces opts.url so getReadPool() constructs
       // against the canonical search path.
+      const directUrl = opts.directUrl ?? process.env.GBRAIN_DIRECT_DATABASE_URL ?? deriveDirectUrl(opts.url);
       const normalized = normalizeDedicatedPostgresConfig({
         database_url: opts.url,
-        direct_database_url: opts.directUrl ?? undefined,
+        direct_database_url: directUrl ?? undefined,
         postgres_schema: opts.postgresSchema,
       });
       this.opts = { ...opts, url: normalized.database_url!, directUrl: normalized.direct_database_url ?? null };
       this._isSupabase = isSupabasePoolerUrl(normalized.database_url!);
-      // Direct URL: explicit (now normalized) override > env > derive > null
-      const envOverride = process.env.GBRAIN_DIRECT_DATABASE_URL;
-      this._directUrl = normalized.direct_database_url ?? envOverride ?? deriveDirectUrl(normalized.database_url!);
+      // Direct URL: explicit > env > derive > null, normalized after resolution.
+      this._directUrl = normalized.direct_database_url ?? null;
     }
   }
 
