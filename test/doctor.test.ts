@@ -142,8 +142,9 @@ describe('doctor command', () => {
     // Old pattern — must not come back. If it does, we're filtering the scan
     // to a hardcoded set and every plugin/user table is invisible again.
     expect(rlsBlock).not.toMatch(/tablename\s+IN\s*\(/);
-    // New semantics: the scan query has no WHERE-IN filter, just schemaname='public'.
-    expect(rlsBlock).toMatch(/FROM\s+pg_tables\b[\s\S]{0,200}schemaname\s*=\s*'public'/);
+    // New semantics: the scan query has no WHERE-IN filter and follows the
+    // active schema (legacy connections still resolve current_schema()=public).
+    expect(rlsBlock).toMatch(/FROM\s+pg_tables\b[\s\S]{0,400}schemaname\s*=\s*current_schema\(\)/);
   });
 
   test('RLS check raises status=fail with quoted-identifier remediation SQL', async () => {

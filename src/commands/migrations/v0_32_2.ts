@@ -82,7 +82,9 @@ async function phaseASchema(
     // Quick post-condition: row_num + source_markdown_slug exist on facts.
     const rows = await engine.executeRaw<{ column_name: string }>(
       `SELECT column_name FROM information_schema.columns
-       WHERE table_name = 'facts' AND column_name IN ('row_num', 'source_markdown_slug')`,
+       WHERE table_schema = current_schema()
+         AND table_name = 'facts'
+         AND column_name IN ('row_num', 'source_markdown_slug')`,
     );
     if (rows.length < 2) {
       return {

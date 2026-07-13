@@ -103,12 +103,17 @@ export async function dropZombieIndexes(
   const dropped: string[] = [];
   try {
     // Find invalid indexes on our tables.
-    const rows = await engine.executeRaw<{ indexname: string; tablename: string }>(
-      `SELECT i.relname AS indexname, t.relname AS tablename
+    const rows = await engine.executeRaw<{ indexname: string; tablename: string; drop_name: string }>(
+      `SELECT i.relname AS indexname, t.relname AS tablename,
+              format('%I.%I', ni.nspname, i.relname) AS drop_name
        FROM pg_index ix
        JOIN pg_class i ON i.oid = ix.indexrelid
+       JOIN pg_namespace ni ON ni.oid = i.relnamespace
        JOIN pg_class t ON t.oid = ix.indrelid
+       JOIN pg_namespace nt ON nt.oid = t.relnamespace
        WHERE ix.indisvalid = false
+         AND ni.nspname = current_schema()
+         AND nt.nspname = current_schema()
          AND t.relname = ANY($1)`,
       [tableNames],
     );
@@ -120,7 +125,7 @@ export async function dropZombieIndexes(
         continue;
       }
       try {
-        await engine.executeRaw(`DROP INDEX IF EXISTS ${r.indexname}`);
+        await engine.executeRaw(`DROP INDEX IF EXISTS ${r.drop_name}`);
         dropped.push(r.indexname);
         process.stderr.write(`[hnsw] dropped zombie index ${r.indexname} on ${r.tablename}\n`);
       } catch (err) {
@@ -225,7 +230,11 @@ export async function monitorBuild(
     let size_bytes: number | undefined;
     try {
       const rows = await engine.executeRaw<{ size: number }>(
-        `SELECT pg_relation_size(c.oid) AS size FROM pg_class c WHERE c.relname = $1 LIMIT 1`,
+        `SELECT pg_relation_size(c.oid) AS size
+           FROM pg_class c
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = current_schema() AND c.relname = $1
+          LIMIT 1`,
         [indexName],
       );
       if (rows[0]) size_bytes = Number(rows[0].size);

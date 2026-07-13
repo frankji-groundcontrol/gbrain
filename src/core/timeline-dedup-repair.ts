@@ -53,7 +53,10 @@ export async function checkTimelineDedupIndex(engine: BrainEngine): Promise<Time
     return { tablePresent: false, indexPresent: false, columns: [], needsRepair: false };
   }
   const rows = await engine.executeRaw<{ indexdef: string }>(
-    `SELECT indexdef FROM pg_indexes WHERE indexname = $1`,
+    `SELECT indexdef FROM pg_indexes
+      WHERE schemaname = current_schema()
+        AND tablename = 'timeline_entries'
+        AND indexname = $1`,
     [INDEX_NAME],
   );
   const indexPresent = rows.length > 0;

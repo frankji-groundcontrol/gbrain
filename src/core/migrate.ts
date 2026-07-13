@@ -5850,6 +5850,72 @@ export function isDeadlockError(err: unknown): boolean {
  *
  * Exported for unit testing (`test/migration-attempt.test.ts`).
  */
+const CONSTRAINT_RELATIONS: Readonly<Record<string, string>> = {
+  links_link_source_check: 'links',
+  links_from_to_type_source_origin_unique: 'links',
+  pages_source_slug_key: 'pages',
+  links_resolution_type_check: 'links',
+  oauth_clients_source_id_fkey: 'oauth_clients',
+  subagent_tool_executions_stable_id: 'subagent_tool_executions',
+  fk_oauth_clients_bound_source: 'oauth_clients',
+};
+
+const INDEX_RELATIONS: Readonly<Record<string, string>> = {
+  idx_pages_updated_at_desc: 'pages',
+  pages_deleted_at_purge_idx: 'pages',
+  pages_coalesce_date_idx: 'pages',
+  idx_chunks_embedding_null: 'content_chunks',
+  takes_resolved_at_idx: 'takes',
+  pages_generation_idx: 'pages',
+  idx_facts_extract_conversation_session: 'facts',
+  pages_dedup_idx: 'pages',
+  content_chunks_stale_idx: 'content_chunks',
+  pages_atom_source_hash_idx: 'pages',
+  pages_links_extracted_at_idx: 'pages',
+};
+
+/**
+ * Dedicated-mode compatibility renderer for historical migration probes.
+ * The Migration registry stays byte-identical; only SQL selected for the
+ * restricted active schema is rewritten before execution.
+ */
+export function scopeMigrationCatalogProbes(sql: string): string {
+  let scoped = sql.replace(
+    "WHERE table_name = 'files'",
+    "WHERE table_schema = current_schema() AND table_name = 'files'",
+  );
+  for (const [constraint, relation] of Object.entries(CONSTRAINT_RELATIONS)) {
+    scoped = scoped.replaceAll(
+      `conname = '${constraint}'`,
+      `conname = '${constraint}' AND conrelid = '${relation}'::regclass`,
+    );
+  }
+  for (const [index, relation] of Object.entries(INDEX_RELATIONS)) {
+    scoped = scoped.replaceAll(
+      `WHERE c.relname = '${index}' AND NOT i.indisvalid`,
+      `WHERE c.relname = '${index}' AND i.indrelid = '${relation}'::regclass AND NOT i.indisvalid`,
+    );
+  }
+  return scoped;
+}
+
+function scopedMigrationEngine(engine: BrainEngine, force = false): BrainEngine {
+  if (!force && engine.kind !== 'postgres') return engine;
+  return new Proxy(engine, {
+    get(target, prop, receiver) {
+      if (prop === 'runMigration') {
+        return (version: number, sql: string) => target.runMigration(version, scopeMigrationCatalogProbes(sql));
+      }
+      if (prop === 'transaction') {
+        return <T>(fn: (tx: BrainEngine) => Promise<T>) =>
+          target.transaction((tx) => fn(scopedMigrationEngine(tx, true)));
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 export async function attemptMigration(engine: BrainEngine, m: Migration): Promise<void> {
   const sql = selectMigrationSql(m, engine);
   const useTransaction = m.transaction !== false;
@@ -5868,7 +5934,10 @@ export async function attemptMigration(engine: BrainEngine, m: Migration): Promi
         } catch { /* non-fatal: older Postgres or restricted GUC */ }
       }
       if (sql) {
-        await tx.runMigration(m.version, sql);
+        await tx.runMigration(
+          m.version,
+          engine.kind === 'postgres' ? scopeMigrationCatalogProbes(sql) : sql,
+        );
       }
       if (m.verify) {
         const ok = await m.verify(tx).catch(() => false);
@@ -5884,7 +5953,7 @@ export async function attemptMigration(engine: BrainEngine, m: Migration): Promi
     // Handler runs on the outer engine after the DDL transaction committed.
     // CONCURRENTLY and other non-transactional DDL live here.
     if (m.handler) {
-      await m.handler(engine);
+      await m.handler(scopedMigrationEngine(engine));
     }
     await engine.setConfig('version', String(m.version));
     return;
@@ -5896,11 +5965,13 @@ export async function attemptMigration(engine: BrainEngine, m: Migration): Promi
       try {
         await conn.executeRaw("SET statement_timeout = '600000'");
       } catch { /* non-fatal */ }
-      await conn.executeRaw(sql);
+      await conn.executeRaw(
+        engine.kind === 'postgres' ? scopeMigrationCatalogProbes(sql) : sql,
+      );
     });
   }
   if (m.handler) {
-    await m.handler(engine);
+    await m.handler(scopedMigrationEngine(engine));
   }
   if (m.verify) {
     const ok = await m.verify(engine).catch(() => false);

@@ -1875,7 +1875,8 @@ export async function checkBrainstormHealth(engine: BrainEngine): Promise<Check>
     const probeRows = await engine.executeRaw<{ exists: boolean }>(
       `SELECT EXISTS (
          SELECT 1 FROM information_schema.columns
-         WHERE table_name = 'pages' AND column_name = 'last_retrieved_at'
+         WHERE table_schema = current_schema()
+           AND table_name = 'pages' AND column_name = 'last_retrieved_at'
        ) AS exists`,
       []
     );
@@ -7069,7 +7070,10 @@ export async function buildChecks(
   progress.heartbeat('facts_health');
   try {
     const factsExists = await engine.executeRaw<{ exists: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'facts') AS exists`,
+      `SELECT EXISTS (
+         SELECT 1 FROM information_schema.tables
+          WHERE table_schema = current_schema() AND table_name = 'facts'
+       ) AS exists`,
     );
     if (factsExists[0]?.exists) {
       const health = await engine.getFactsHealth('default');

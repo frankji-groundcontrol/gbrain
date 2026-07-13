@@ -144,8 +144,13 @@ export async function ensureBackfillIndex<TRow>(
   const { name, sql } = spec.requiredIndex;
   try {
     const rows = await engine.executeRaw<{ exists: boolean }>(
-      `SELECT EXISTS(SELECT 1 FROM pg_indexes WHERE indexname = $1) AS exists`,
-      [name],
+      `SELECT EXISTS(
+         SELECT 1 FROM pg_indexes
+          WHERE schemaname = current_schema()
+            AND tablename = $2
+            AND indexname = $1
+       ) AS exists`,
+      [name, spec.table],
     );
     if (rows[0]?.exists) return { existed: true, created: false };
     // Create the index. CONCURRENTLY can't run inside a transaction, so we

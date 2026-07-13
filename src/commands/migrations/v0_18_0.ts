@@ -143,7 +143,9 @@ async function phaseCVerify(opts: OrchestratorOpts): Promise<OrchestratorPhaseRe
 
       // Optional: composite UNIQUE if installed (Step 2 future work).
       const constraint = await engine.executeRaw<{ conname: string }>(
-        `SELECT conname FROM pg_constraint WHERE conname = 'pages_source_slug_key'`,
+        `SELECT conname FROM pg_constraint
+          WHERE conname = 'pages_source_slug_key'
+            AND conrelid = 'pages'::regclass`,
       );
       // If installed, verify no pages have NULL source_id.
       if (constraint.length === 1) {
