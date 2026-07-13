@@ -119,7 +119,7 @@ describe('Lane D — vector-index lifecycle on PGLite', () => {
   });
 
   test('checkActiveBuild on PGLite returns active: false', async () => {
-    const r = await checkActiveBuild(engine, 'idx_chunks_embedding');
+    const r = await checkActiveBuild(engine, 'idx_chunks_embedding', 'content_chunks');
     expect(r.active).toBe(false);
   });
 });

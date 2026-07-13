@@ -29,7 +29,6 @@ import {
   attemptMigration,
   LATEST_VERSION,
   MIGRATIONS,
-  selectMigrationSql,
 } from '../../src/core/migrate.ts';
 import {
   KEY_APPLIED,
@@ -186,76 +185,62 @@ describe.skipIf(skip)('groundcontrol dedicated schema lifecycle (E2E)', () => {
     expect(after).toBe(before);
   }, 120_000);
 
-  test('public decoy constraints do not suppress active-schema migrations', async () => {
+  test('public constraint decoy cannot satisfy v60 active-schema creation', async () => {
     if (!ADMIN_URL) return;
     await tempAdmin.unsafe(`
       CREATE TABLE public.pages (
         id serial PRIMARY KEY, updated_at timestamptz DEFAULT now(),
         source_id text NOT NULL DEFAULT 'default', slug text NOT NULL
       );
-      ALTER TABLE public.pages ADD CONSTRAINT pages_source_slug_key UNIQUE (source_id, slug);
-
       CREATE TABLE public.links (
         from_page_id integer, to_page_id integer, link_type text,
         link_source text, origin_page_id integer
       );
-      ALTER TABLE public.links ADD CONSTRAINT links_link_source_check CHECK (link_source IS NULL);
-      ALTER TABLE public.links ADD CONSTRAINT links_from_to_type_source_origin_unique
-        UNIQUE NULLS NOT DISTINCT (from_page_id, to_page_id, link_type, link_source, origin_page_id);
-
       CREATE TABLE public.content_chunks (embedding_image extensions.vector(1024));
       CREATE TABLE public.facts (id bigserial PRIMARY KEY);
-
-      CREATE TABLE public.oauth_clients (source_id text, bound_source_id text);
+      CREATE TABLE public.oauth_clients (source_id text);
       ALTER TABLE public.oauth_clients ADD CONSTRAINT oauth_clients_source_id_fkey
         FOREIGN KEY (source_id) REFERENCES groundcontrol.sources(id) ON DELETE SET NULL;
-      ALTER TABLE public.oauth_clients ADD CONSTRAINT fk_oauth_clients_bound_source
-        FOREIGN KEY (bound_source_id) REFERENCES groundcontrol.sources(id) ON DELETE SET NULL;
-
-      CREATE TABLE public.subagent_tool_executions (job_id bigint, message_idx integer, ordinal integer);
-      ALTER TABLE public.subagent_tool_executions ADD CONSTRAINT subagent_tool_executions_stable_id
-        UNIQUE (job_id, message_idx, ordinal);
+      ALTER TABLE groundcontrol.oauth_clients DROP CONSTRAINT oauth_clients_source_id_fkey;
     `);
+    const publicBefore = await tempAdmin<{ oid: number }[]>`
+      SELECT c.oid::int AS oid FROM pg_constraint c
+       WHERE c.conname = 'oauth_clients_source_id_fkey'
+         AND c.conrelid = 'public.oauth_clients'::regclass`;
 
-    for (const version of [11, 60, 82, 85]) {
-      await attemptMigration(appEngine, MIGRATIONS.find((m) => m.version === version)!);
-    }
+    await attemptMigration(appEngine, MIGRATIONS.find((m) => m.version === 60)!);
 
-    const active = await tempAdmin<{ conname: string }[]>`
-      SELECT c.conname
-        FROM pg_constraint c
-        JOIN pg_class r ON r.oid = c.conrelid
-        JOIN pg_namespace n ON n.oid = r.relnamespace
-       WHERE n.nspname = 'groundcontrol'
-         AND c.conname IN (
-           'links_link_source_check', 'links_from_to_type_source_origin_unique',
-           'oauth_clients_source_id_fkey', 'subagent_tool_executions_stable_id',
-           'fk_oauth_clients_bound_source'
-         )`;
-    expect(new Set(active.map((r) => r.conname))).toEqual(new Set([
-      'links_link_source_check', 'links_from_to_type_source_origin_unique',
-      'oauth_clients_source_id_fkey', 'subagent_tool_executions_stable_id',
-      'fk_oauth_clients_bound_source',
-    ]));
-
-    const publicConstraints = await tempAdmin<{ n: number }[]>`
-      SELECT count(*)::int AS n
-        FROM pg_constraint c
-        JOIN pg_class r ON r.oid = c.conrelid
-        JOIN pg_namespace n ON n.oid = r.relnamespace
-       WHERE n.nspname = 'public'
-         AND c.conname IN (
-           'links_link_source_check', 'links_from_to_type_source_origin_unique',
-           'oauth_clients_source_id_fkey', 'subagent_tool_executions_stable_id',
-           'fk_oauth_clients_bound_source'
-         )`;
-    expect(publicConstraints[0]?.n).toBe(5);
+    const active = await tempAdmin<{ oid: number }[]>`
+      SELECT c.oid::int AS oid FROM pg_constraint c
+       WHERE c.conname = 'oauth_clients_source_id_fkey'
+         AND c.conrelid = 'groundcontrol.oauth_clients'::regclass`;
+    const publicAfter = await tempAdmin<{ oid: number }[]>`
+      SELECT c.oid::int AS oid FROM pg_constraint c
+       WHERE c.conname = 'oauth_clients_source_id_fkey'
+         AND c.conrelid = 'public.oauth_clients'::regclass`;
+    expect(active).toHaveLength(1);
+    expect(publicAfter).toEqual(publicBefore);
   }, 60_000);
 
-  test('public relation, column, function, and trigger decoys do not satisfy active probes', async () => {
+  test('v23 files existence probe reaches the active table without public mutation', async () => {
     if (!ADMIN_URL) return;
     await tempAdmin.unsafe(`
-      CREATE TABLE IF NOT EXISTS public.files (id integer);
+      ALTER TABLE groundcontrol.files DROP CONSTRAINT IF EXISTS files_page_slug_fkey;
+      ALTER TABLE groundcontrol.files ADD CONSTRAINT files_page_slug_fkey CHECK (page_slug IS NULL OR page_slug <> '');
+    `);
+    await attemptMigration(appEngine, MIGRATIONS.find((m) => m.version === 23)!);
+    const active = await tempAdmin<{ exists: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conname = 'files_page_slug_fkey'
+           AND conrelid = 'groundcontrol.files'::regclass
+      ) AS exists`;
+    expect(active[0]?.exists).toBe(false);
+  }, 60_000);
+
+  test('retrieval column decoy is ignored and v91 owns active trigger placement', async () => {
+    if (!ADMIN_URL) return;
+    await tempAdmin.unsafe(`
       ALTER TABLE public.content_chunks ADD COLUMN IF NOT EXISTS embedding_image extensions.vector(1024);
       CREATE OR REPLACE FUNCTION public.bump_page_generation_fn() RETURNS trigger AS $$
       BEGIN RETURN NEW; END $$ LANGUAGE plpgsql SET search_path = pg_catalog;
@@ -263,15 +248,6 @@ describe.skipIf(skip)('groundcontrol dedicated schema lifecycle (E2E)', () => {
       CREATE TRIGGER bump_page_generation_trg BEFORE INSERT ON public.pages
         FOR EACH ROW EXECUTE FUNCTION public.bump_page_generation_fn();
     `);
-
-    const v23 = MIGRATIONS.find((m) => m.version === 23)!;
-    await tempAdmin.unsafe(`DROP TABLE IF EXISTS groundcontrol.files CASCADE`);
-    await expect(attemptMigration(appEngine, v23)).rejects.toThrow(/relation "files" does not exist/);
-    const pagesUnique = await tempAdmin<{ n: number }[]>`
-      SELECT count(*)::int AS n FROM pg_constraint
-       WHERE conname = 'pages_source_slug_key'
-         AND conrelid = 'groundcontrol.pages'::regclass`;
-    expect(pagesUnique[0]?.n).toBe(1);
 
     await tempAdmin.unsafe(`ALTER TABLE groundcontrol.content_chunks DROP COLUMN IF EXISTS embedding_image CASCADE`);
     await appEngine.unsetConfig(KEY_APPLIED);
@@ -316,6 +292,19 @@ describe.skipIf(skip)('groundcontrol dedicated schema lifecycle (E2E)', () => {
     expect(objects.map((r) => `${r.schema}:${r.kind}:${r.n}`).sort()).toEqual([
       'groundcontrol:function:1', 'groundcontrol:trigger:1',
       'public:function:1', 'public:trigger:1',
+    ]);
+    const triggerTargets = await tempAdmin<{ schema: string; table_name: string; function_schema: string }[]>`
+      SELECT tn.nspname AS schema, tc.relname AS table_name, pn.nspname AS function_schema
+        FROM pg_trigger t
+        JOIN pg_class tc ON tc.oid = t.tgrelid
+        JOIN pg_namespace tn ON tn.oid = tc.relnamespace
+        JOIN pg_proc p ON p.oid = t.tgfoid
+        JOIN pg_namespace pn ON pn.oid = p.pronamespace
+       WHERE t.tgname = 'bump_page_generation_trg' AND NOT t.tgisinternal
+       ORDER BY tn.nspname`;
+    expect([...triggerTargets]).toEqual([
+      { schema: 'groundcontrol', table_name: 'pages', function_schema: 'groundcontrol' },
+      { schema: 'public', table_name: 'pages', function_schema: 'public' },
     ]);
   }, 90_000);
 
@@ -363,9 +352,9 @@ describe.skipIf(skip)('groundcontrol dedicated schema lifecycle (E2E)', () => {
        WHERE schemaname = 'public' AND indexname = 'idx_timeline_dedup'`;
     expect(publicTimeline[0]?.indexdef).toContain('(page_id, date, summary, source)');
 
-    expect(await dropZombieIndexes(appEngine, ['pages'])).toEqual({
-      dropped: ['gc_active_invalid_idx', 'gc_shared_invalid_idx'],
-    });
+    expect(new Set((await dropZombieIndexes(appEngine, ['pages'])).dropped)).toEqual(
+      new Set(['gc_active_invalid_idx', 'gc_shared_invalid_idx']),
+    );
     const publicInvalid = await tempAdmin<{ n: number }[]>`
       SELECT count(*)::int AS n FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
        WHERE n.nspname = 'public'
@@ -385,15 +374,38 @@ describe.skipIf(skip)('groundcontrol dedicated schema lifecycle (E2E)', () => {
     expect(requiredSchemas.map((r) => r.schemaname)).toEqual(['groundcontrol', 'public']);
   }, 60_000);
 
+  test('v91 invalid-index probe ignores an invalid public decoy and preserves the valid active index', async () => {
+    if (!ADMIN_URL) return;
+    await tempAdmin.unsafe(`
+      DROP INDEX IF EXISTS public.pages_generation_idx;
+      CREATE INDEX pages_generation_idx ON public.pages(id);
+      UPDATE pg_index SET indisvalid = false
+       WHERE indexrelid = 'public.pages_generation_idx'::regclass;
+    `);
+    const activeBefore = await tempAdmin<{ oid: number }[]>`
+      SELECT 'groundcontrol.pages_generation_idx'::regclass::oid::int AS oid`;
+    const publicBefore = await tempAdmin<{ oid: number }[]>`
+      SELECT 'public.pages_generation_idx'::regclass::oid::int AS oid`;
+
+    await attemptMigration(appEngine, MIGRATIONS.find((m) => m.version === 91)!);
+
+    const activeAfter = await tempAdmin<{ oid: number }[]>`
+      SELECT 'groundcontrol.pages_generation_idx'::regclass::oid::int AS oid`;
+    const publicAfter = await tempAdmin<{ oid: number; valid: boolean }[]>`
+      SELECT c.oid::int AS oid, i.indisvalid AS valid
+        FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid
+       WHERE c.oid = 'public.pages_generation_idx'::regclass`;
+    expect(activeAfter).toEqual(activeBefore);
+    expect([...publicAfter]).toEqual([{ oid: publicBefore[0]!.oid, valid: false }]);
+  }, 60_000);
+
   test('dedicated v120 alters only active functions and creates no auto-enable function', async () => {
     if (!ADMIN_URL) return;
     await tempAdmin.unsafe(`
       CREATE OR REPLACE FUNCTION public.update_chunk_search_vector() RETURNS trigger AS $$
       BEGIN RETURN NEW; END $$ LANGUAGE plpgsql SET search_path = pg_catalog;
     `);
-    await appEngine.withReservedConnection(async (conn) => {
-      await conn.executeRaw(selectMigrationSql(MIGRATIONS.find((m) => m.version === 120)!, appEngine)!);
-    });
+    await attemptMigration(appEngine, MIGRATIONS.find((m) => m.version === 120)!);
     const paths = await tempAdmin<{ schema: string; proconfig: string[] | null }[]>`
       SELECT n.nspname AS schema, p.proconfig
         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace

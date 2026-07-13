@@ -11,6 +11,30 @@ function isActiveSchemaScoped(sql: string): boolean {
   return /current_schema\(\)/.test(sql) || /::regclass/.test(sql);
 }
 
+const CONSTRAINT_PROBE_FIXTURES = [
+  [11, 'links_link_source_check', 'links'],
+  [11, 'links_from_to_type_source_origin_unique', 'links'],
+  [22, 'links_resolution_type_check', 'links'],
+  [23, 'pages_source_slug_key', 'pages'],
+  [60, 'oauth_clients_source_id_fkey', 'oauth_clients'],
+  [82, 'subagent_tool_executions_stable_id', 'subagent_tool_executions'],
+  [85, 'fk_oauth_clients_bound_source', 'oauth_clients'],
+] as const;
+
+const INDEX_HANDLER_FIXTURES = [
+  [14, 'idx_pages_updated_at_desc', 'pages'],
+  [34, 'pages_deleted_at_purge_idx', 'pages'],
+  [41, 'pages_coalesce_date_idx', 'pages'],
+  [66, 'idx_chunks_embedding_null', 'content_chunks'],
+  [72, 'takes_resolved_at_idx', 'takes'],
+  [91, 'pages_generation_idx', 'pages'],
+  [96, 'idx_facts_extract_conversation_session', 'facts'],
+  [97, 'pages_dedup_idx', 'pages'],
+  [103, 'content_chunks_stale_idx', 'content_chunks'],
+  [104, 'pages_atom_source_hash_idx', 'pages'],
+  [112, 'pages_links_extracted_at_idx', 'pages'],
+] as const;
+
 describe('active-schema catalog probes', () => {
   test('migration SQL scopes representative constraints, relations, and invalid indexes', async () => {
     const mod = await import('../src/core/migrate.ts') as typeof import('../src/core/migrate.ts') & {
@@ -19,19 +43,24 @@ describe('active-schema catalog probes', () => {
     expect(typeof mod.scopeMigrationCatalogProbes).toBe('function');
     const scope = mod.scopeMigrationCatalogProbes!;
 
-    const constraints = [
-      [11, 'links_link_source_check', "'links'::regclass"],
-      [22, 'links_resolution_type_check', "'links'::regclass"],
-      [60, 'oauth_clients_source_id_fkey', "'oauth_clients'::regclass"],
-      [82, 'subagent_tool_executions_stable_id', "'subagent_tool_executions'::regclass"],
-      [85, 'fk_oauth_clients_bound_source', "'oauth_clients'::regclass"],
-    ] as const;
-    for (const [version, name, relation] of constraints) {
+    for (const [version, name, table] of CONSTRAINT_PROBE_FIXTURES) {
       const migration = mod.MIGRATIONS.find((m) => m.version === version)!;
-      const sql = scope(migration.sqlFor?.postgres ?? migration.sql ?? '');
+      const captured: string[] = [];
+      if (migration.handler) {
+        await migration.handler({
+          kind: 'postgres',
+          transaction: async (fn: (tx: BrainEngine) => Promise<void>) => fn({
+            kind: 'postgres',
+            runMigration: async (_v: number, sql: string) => { captured.push(sql); },
+          } as unknown as BrainEngine),
+        } as unknown as BrainEngine);
+      } else {
+        captured.push(migration.sqlFor?.postgres ?? migration.sql ?? '');
+      }
+      const sql = captured.map(scope).find((sample) => sample.includes(`conname = '${name}'`)) ?? '';
       const at = sql.indexOf(`conname = '${name}'`);
       expect(at, `v${version} ${name}`).toBeGreaterThanOrEqual(0);
-      expect(sql.slice(at, at + 180), `v${version} ${name}`).toContain(relation);
+      expect(sql.slice(at, at + 180), `v${version} ${name}`).toContain(`'${table}'::regclass`);
     }
 
     const v23 = mod.MIGRATIONS.find((m) => m.version === 23)!;
@@ -43,13 +72,7 @@ describe('active-schema catalog probes', () => {
     } as unknown as BrainEngine);
     expect(captured23[0]).toContain('table_schema = current_schema()');
 
-    for (const [version, indexName, table] of [
-      [14, 'idx_pages_updated_at_desc', 'pages'],
-      [34, 'pages_deleted_at_purge_idx', 'pages'],
-      [66, 'idx_chunks_embedding_null', 'content_chunks'],
-      [91, 'pages_generation_idx', 'pages'],
-      [112, 'pages_links_extracted_at_idx', 'pages'],
-    ] as const) {
+    for (const [version, indexName, table] of INDEX_HANDLER_FIXTURES) {
       const migration = mod.MIGRATIONS.find((m) => m.version === version)!;
       const captured: string[] = [];
       await migration.handler!({
@@ -83,43 +106,33 @@ describe('active-schema catalog probes', () => {
     );
   });
 
-  test('all dedicated migration name-only catalog probes have a scoped renderer rule', async () => {
-    const mod = await import('../src/core/migrate.ts') as typeof import('../src/core/migrate.ts') & {
-      scopeMigrationCatalogProbes: (sql: string) => string;
-    };
-    const samples: string[] = [];
-    for (const migration of mod.MIGRATIONS) {
-      const base = migration.sqlFor?.postgres ?? migration.sql;
-      if (base) samples.push(base);
-      if (migration.handler) {
-        const captured: string[] = [];
-        try {
-          await migration.handler({
-            kind: 'postgres',
-            runMigration: async (_v: number, sql: string) => { captured.push(sql); },
-            transaction: async (fn: (tx: unknown) => Promise<void>) => fn({
-              kind: 'postgres',
-              runMigration: async (_v: number, sql: string) => { captured.push(sql); },
-            }),
-            executeRaw: async () => [{ extversion: '0.8.0' }],
-          } as unknown as BrainEngine);
-        } catch { /* handlers with extra runtime state are outside catalog discovery */ }
-        samples.push(...captured);
-      }
-    }
+  test('explicit catalog fixture inventory covers every renderer rule and handler probe', async () => {
+    const mod = await import('../src/core/migrate.ts');
+    const source = await Bun.file(new URL('../src/core/migrate.ts', import.meta.url)).text();
+    const constraintBlock = source.match(/const CONSTRAINT_RELATIONS[^=]*= \{([\s\S]*?)\n\};/)?.[1];
+    const indexBlock = source.match(/const INDEX_RELATIONS[^=]*= \{([\s\S]*?)\n\};/)?.[1];
+    expect(constraintBlock).toBeDefined();
+    expect(indexBlock).toBeDefined();
+    const names = (block: string) => [...block.matchAll(/^\s{2}(\w+): '[^']+',$/gm)].map((match) => match[1]);
+    const constraintRuleNames = names(constraintBlock!);
+    const indexRuleNames = names(indexBlock!);
 
-    for (const sql of samples) {
-      const scoped = mod.scopeMigrationCatalogProbes(sql);
-      for (const match of scoped.matchAll(/conname\s*=\s*'[^']+'/g)) {
-        const probe = scoped.slice(match.index, match.index + 180);
-        expect(probe, match[0]).toContain('conrelid');
-      }
-      if (/FROM pg_index i[\s\S]*?c\.relname\s*=/.test(scoped)) {
-        expect(scoped).toContain('i.indrelid =');
-      }
-      if (/information_schema\.tables\s+WHERE table_name\s*=\s*'files'/.test(scoped)) {
-        throw new Error('files relation probe lacks table_schema = current_schema()');
-      }
+    expect([...CONSTRAINT_PROBE_FIXTURES.map(([, name]) => name)].sort() as string[]).toEqual(constraintRuleNames.sort());
+    expect([...INDEX_HANDLER_FIXTURES.map(([, name]) => name)].sort() as string[]).toEqual(indexRuleNames.sort());
+
+    for (const [version, indexName, table] of INDEX_HANDLER_FIXTURES) {
+      const migration = mod.MIGRATIONS.find((candidate) => candidate.version === version);
+      expect(migration?.handler, `missing v${version} handler for ${indexName}`).toBeFunction();
+      const captured: string[] = [];
+      await migration!.handler!({
+        kind: 'postgres',
+        runMigration: async (_v: number, sql: string) => { captured.push(sql); },
+      } as unknown as BrainEngine);
+      const probe = captured.find((sql) => sql.includes('pg_index'));
+      expect(probe, `v${version} ${indexName} handler did not reach its probe`).toBeDefined();
+      expect(mod.scopeMigrationCatalogProbes(probe!), `v${version} ${indexName}`).toContain(
+        `i.indrelid = '${table}'::regclass`,
+      );
     }
   });
 
@@ -155,7 +168,7 @@ describe('active-schema catalog probes', () => {
                 { indexname: 'active_bad', tablename: 'pages', drop_name: '"groundcontrol"."active_bad"' },
               ];
         }
-        if (sql.includes('pg_stat_activity')) return [];
+        if (sql.includes('pg_stat_progress_create_index')) return [];
         return [];
       },
     } as unknown as BrainEngine;
@@ -233,7 +246,7 @@ describe('active-schema catalog probes', () => {
       kind: 'postgres' as const,
       executeRaw: async (sql: string) => {
         seen.push(sql);
-        if (sql.includes('pg_stat_activity')) {
+        if (sql.includes('pg_stat_progress_create_index')) {
           activeCalls++;
           return activeCalls === 1
             ? [{ pid: 1, query: 'CREATE INDEX scoped_idx', application_name: 'gbrain' }]

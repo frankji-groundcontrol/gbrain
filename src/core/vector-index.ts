@@ -8,7 +8,7 @@
  *   - dropAndRebuild (A3): atomic-swap pattern; build new index with temp
  *     name, ALTER...RENAME swap atomically, drop old. If rebuild fails the
  *     old index stays intact and search keeps working.
- *   - checkActiveBuild: pre-op probe of pg_stat_activity.
+ *   - checkActiveBuild: pre-op probe of pg_stat_progress_create_index.
  *   - dropZombieIndexes: startup sweep of indisvalid=false indexes,
  *     guarded against in-progress builds.
  *   - monitorBuild: progress reporter during long-running CREATE INDEX.
@@ -56,24 +56,32 @@ export interface ActiveBuildInfo {
 }
 
 /**
- * Probe pg_stat_activity for an active CREATE INDEX on this index name.
+ * Probe Postgres build progress for this exact active-schema index/table pair.
  * Used as a pre-op guard so dropAndRebuild doesn't compete with a build
  * already in flight (Supabase auto-maintenance + parallel gbrain procs).
  */
 export async function checkActiveBuild(
   engine: BrainEngine,
   indexName: string,
+  tableName: string,
 ): Promise<ActiveBuildInfo> {
   if (engine.kind !== 'postgres') return { active: false };
   try {
     const rows = await engine.executeRaw<{ pid: number; query: string; application_name: string | null }>(
-      `SELECT pid, query, application_name
-       FROM pg_stat_activity
-       WHERE state = 'active'
-         AND (query ILIKE $1 OR query ILIKE $2)
-         AND pid != pg_backend_pid()
-       LIMIT 1`,
-      [`%CREATE INDEX%${indexName}%`, `%REINDEX%${indexName}%`],
+      `SELECT a.pid, a.query, a.application_name
+         FROM pg_stat_progress_create_index p
+         JOIN pg_stat_activity a ON a.pid = p.pid
+         JOIN pg_class t ON t.oid = p.relid
+         JOIN pg_namespace nt ON nt.oid = t.relnamespace
+         LEFT JOIN pg_class i ON i.oid = p.index_relid
+         LEFT JOIN pg_namespace ni ON ni.oid = i.relnamespace
+        WHERE nt.nspname = current_schema()
+          AND t.relname = $1
+          AND ni.nspname = current_schema()
+          AND i.relname = $2
+          AND a.pid != pg_backend_pid()
+        LIMIT 1`,
+      [tableName, indexName],
     );
     if (rows.length === 0) return { active: false };
     const r = rows[0];
@@ -119,7 +127,7 @@ export async function dropZombieIndexes(
     );
     for (const r of rows) {
       // Guard: skip if there's an active build for this index.
-      const active = await checkActiveBuild(engine, r.indexname);
+      const active = await checkActiveBuild(engine, r.indexname, r.tablename);
       if (active.active) {
         process.stderr.write(`[hnsw] skipping zombie cleanup of ${r.indexname} — active build (pid ${active.pid})\n`);
         continue;
@@ -165,7 +173,7 @@ export async function dropAndRebuild(
     return { rebuilt: false, tempName: spec.name };
   }
 
-  const active = await checkActiveBuild(engine, spec.name);
+  const active = await checkActiveBuild(engine, spec.name, spec.table);
   if (active.active && !opts.force) {
     process.stderr.write(
       `[hnsw] dropAndRebuild ${spec.name} aborted: active build pid ${active.pid} (${active.application_name ?? 'unknown'}). Pass --force to proceed anyway.\n`,
@@ -218,14 +226,14 @@ export async function monitorBuild(
   engine: BrainEngine,
   indexName: string,
   onProgress: (status: BuildProgress) => void,
-  opts: { intervalMs?: number; maxIterations?: number } = {},
+  opts: { intervalMs?: number; maxIterations?: number; tableName?: string } = {},
 ): Promise<void> {
   if (engine.kind !== 'postgres') return;
   const interval = opts.intervalMs ?? 30000;
   const maxIterations = opts.maxIterations ?? 240; // 240 * 30s = 2h cap
   const t0 = Date.now();
   for (let i = 0; i < maxIterations; i++) {
-    const active = await checkActiveBuild(engine, indexName);
+    const active = await checkActiveBuild(engine, indexName, opts.tableName ?? 'content_chunks');
     if (!active.active) return;
     let size_bytes: number | undefined;
     try {
