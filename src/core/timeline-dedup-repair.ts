@@ -46,7 +46,9 @@ function parseIndexColumns(indexdef: string): string[] {
 
 export async function checkTimelineDedupIndex(engine: BrainEngine): Promise<TimelineDedupStatus> {
   const tbl = await engine.executeRaw<{ reg: string | null }>(
-    `SELECT to_regclass('timeline_entries')::text AS reg`,
+    engine.kind === 'postgres'
+      ? `SELECT to_regclass(format('%I.%I', current_schema(), 'timeline_entries'))::text AS reg`
+      : `SELECT to_regclass('timeline_entries')::text AS reg`,
   );
   const tablePresent = !!tbl[0]?.reg;
   if (!tablePresent) {

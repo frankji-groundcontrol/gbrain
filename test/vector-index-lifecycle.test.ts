@@ -82,13 +82,14 @@ describe('checkActiveBuild', () => {
     expect(capturedParams).toEqual(['content_chunks', 'idx_chunks_embedding']);
   });
 
-  test('query failure returns active: false (best-effort)', async () => {
+  test('query failure is unknown, not inactive', async () => {
     const fakeEngine = {
       kind: 'postgres' as const,
       executeRaw: async () => { throw new Error('permission denied'); },
     } as never;
     const r = await checkActiveBuild(fakeEngine, 'idx_chunks_embedding', 'content_chunks');
     expect(r.active).toBe(false);
+    expect(r.status).toBe('unknown');
   });
 });
 
@@ -166,6 +167,24 @@ describe('dropZombieIndexes', () => {
     const r = await dropZombieIndexes(fakeEngine);
     expect(r.dropped).toEqual([]);
   });
+
+  test('Postgres: query failure skips destructive zombie cleanup', async () => {
+    const drops: string[] = [];
+    const fakeEngine = {
+      kind: 'postgres' as const,
+      executeRaw: async (sql: string) => {
+        if (sql.includes('pg_index')) {
+          return [{ indexname: 'zombie_idx_a', tablename: 'content_chunks', drop_name: '"groundcontrol"."zombie_idx_a"' }];
+        }
+        if (sql.includes('pg_stat_progress_create_index')) throw new Error('permission denied');
+        if (sql.startsWith('DROP INDEX')) drops.push(sql);
+        return [];
+      },
+    } as never;
+    const r = await dropZombieIndexes(fakeEngine);
+    expect(r.dropped).toEqual([]);
+    expect(drops).toEqual([]);
+  });
 });
 
 describe('dropAndRebuild — A3 atomic-swap', () => {
@@ -201,6 +220,25 @@ describe('dropAndRebuild — A3 atomic-swap', () => {
     };
     const r = await dropAndRebuild(fakeEngine, spec, { reason: 'auto' });
     expect(r.rebuilt).toBe(false);
+  });
+
+  test('Postgres: query failure skips destructive rebuild even with force', async () => {
+    const fakeEngine = {
+      kind: 'postgres' as const,
+      executeRaw: async () => { throw new Error('permission denied'); },
+      withReservedConnection: async () => { throw new Error('should not be called'); },
+      transaction: async () => { throw new Error('should not be called'); },
+    } as never;
+    const spec: IndexSpec = {
+      name: 'idx_chunks_embedding',
+      table: 'content_chunks',
+      column: 'embedding',
+      using: 'hnsw (embedding vector_cosine_ops)',
+    };
+    expect(await dropAndRebuild(fakeEngine, spec, { reason: 'test', force: true })).toEqual({
+      rebuilt: false,
+      tempName: spec.name,
+    });
   });
 
   test('temp name format: <name>_rebuild_<unix-ms>', async () => {

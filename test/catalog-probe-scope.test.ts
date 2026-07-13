@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { BrainEngine } from '../src/core/engine.ts';
 import { ensureBackfillIndex, type BackfillSpec } from '../src/core/backfill-base.ts';
 import { checkTimelineDedupIndex } from '../src/core/timeline-dedup-repair.ts';
@@ -134,6 +136,86 @@ describe('active-schema catalog probes', () => {
         `i.indrelid = '${table}'::regclass`,
       );
     }
+  });
+
+  test('source inventory classifies every name-only migration-adjacent catalog probe', () => {
+    const root = join(import.meta.dir, '..');
+    const migrationPaths = readdirSync(join(root, 'src/commands/migrations'))
+      .filter((name) => name.endsWith('.ts'))
+      .map((name) => `src/commands/migrations/${name}`);
+    const paths = [
+      'src/core/migrate.ts',
+      'src/core/retrieval-upgrade-planner.ts',
+      'src/core/timeline-dedup-repair.ts',
+      'src/core/vector-index.ts',
+      'src/core/backfill-base.ts',
+      ...migrationPaths,
+    ];
+    const sources = new Map(paths.map((path) => [path, readFileSync(join(root, path), 'utf8')]));
+    const migrate = sources.get('src/core/migrate.ts')!;
+    const rendererNames = (constant: string) => new Set(
+      [...migrate.matchAll(new RegExp(`const ${constant}[^=]*= \\{([\\s\\S]*?)\\n\\};`, 'g'))]
+        .flatMap((block) => [...block[1].matchAll(/^\s{2}(\w+): '[^']+',$/gm)].map((match) => match[1])),
+    );
+    const rendererConstraints = rendererNames('CONSTRAINT_RELATIONS');
+    const rendererIndexes = rendererNames('INDEX_RELATIONS');
+    const findings: string[] = [];
+
+    for (const [path, source] of sources) {
+      for (const match of source.matchAll(/FROM pg_constraint\b/g)) {
+        const probe = source.slice(match.index, match.index + 350);
+        const name = probe.match(/conname\s*=\s*'([^']+)'/)?.[1];
+        if (!/(?:conrelid\s*=\s*'[^']+'::regclass|relnamespace|current_schema\(\))/.test(probe) &&
+            !(path === 'src/core/migrate.ts' && name && rendererConstraints.has(name))) {
+          findings.push(`${path}:pg_constraint:${name ?? match.index}`);
+        }
+      }
+      for (const match of source.matchAll(/FROM pg_index\b/g)) {
+        const probe = source.slice(match.index, match.index + 350);
+        const name = probe.match(/\.relname\s*=\s*'([^']+)'/)?.[1];
+        if (!/(?:indrelid\s*=\s*'[^']+'::regclass|relnamespace|current_schema\(\))/.test(probe) &&
+            !(path === 'src/core/migrate.ts' && name && rendererIndexes.has(name))) {
+          findings.push(`${path}:pg_index:${name ?? match.index}`);
+        }
+      }
+      for (const match of source.matchAll(/(?:information_schema\.(?:tables|columns)|FROM pg_indexes)\b[\s\S]{0,220}/g)) {
+        if (!/(?:table_schema|schemaname)\s*=\s*current_schema\(\)/.test(match[0]) &&
+            !(path === 'src/core/migrate.ts' && /table_name\s*=\s*'files'/.test(match[0]) &&
+              migrate.includes('"WHERE table_schema = current_schema() AND table_name = \'files\'"'))) {
+          findings.push(`${path}:${match.index}`);
+        }
+      }
+      for (const match of source.matchAll(/to_regclass\(([^\n;]+)\)/g)) {
+        if (!/current_schema\(\)/.test(match[1]) &&
+            !(path === 'src/core/timeline-dedup-repair.ts' && match[1] === "'timeline_entries'" &&
+              source.includes("engine.kind === 'postgres'"))) {
+          findings.push(`${path}:to_regclass:${match[1]}`);
+        }
+      }
+    }
+    expect(findings).toEqual([]);
+  });
+
+  test('timeline repair treats public-only table as absent and performs no mutation', async () => {
+    const seen: string[] = [];
+    const engine = {
+      kind: 'postgres' as const,
+      executeRaw: async (sql: string) => {
+        seen.push(sql);
+        if (sql.includes('to_regclass')) {
+          return [{ reg: sql.includes('current_schema()') ? null : 'public.timeline_entries' }];
+        }
+        throw new Error(`unexpected mutation: ${sql}`);
+      },
+    } as unknown as BrainEngine;
+    const { repairTimelineDedupIndex } = await import('../src/core/timeline-dedup-repair.ts');
+    expect(await repairTimelineDedupIndex(engine)).toEqual({
+      repaired: false,
+      before: [],
+      collapsedDuplicates: 0,
+      reason: 'no_table',
+    });
+    expect(seen).toEqual([expect.stringContaining('current_schema()')]);
   });
 
   test('timeline index lookup ignores a correct public decoy', async () => {

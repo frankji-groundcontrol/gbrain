@@ -29,6 +29,7 @@ import {
   attemptMigration,
   LATEST_VERSION,
   MIGRATIONS,
+  scopeMigrationCatalogProbes,
 } from '../../src/core/migrate.ts';
 import {
   KEY_APPLIED,
@@ -222,20 +223,44 @@ describe.skipIf(skip)('groundcontrol dedicated schema lifecycle (E2E)', () => {
     expect(publicAfter).toEqual(publicBefore);
   }, 60_000);
 
-  test('v23 files existence probe reaches the active table without public mutation', async () => {
+  test('v23 files existence branch ignores public-only files without mutating it', async () => {
     if (!ADMIN_URL) return;
     await tempAdmin.unsafe(`
-      ALTER TABLE groundcontrol.files DROP CONSTRAINT IF EXISTS files_page_slug_fkey;
-      ALTER TABLE groundcontrol.files ADD CONSTRAINT files_page_slug_fkey CHECK (page_slug IS NULL OR page_slug <> '');
+      DROP TABLE groundcontrol.files CASCADE;
+      CREATE TABLE IF NOT EXISTS public.files (
+        id bigserial PRIMARY KEY,
+        page_slug text,
+        sentinel text NOT NULL DEFAULT 'unchanged'
+      );
+      ALTER TABLE public.files DROP CONSTRAINT IF EXISTS files_page_slug_fkey;
+      ALTER TABLE public.files ADD CONSTRAINT files_page_slug_fkey CHECK (page_slug IS NULL OR page_slug <> '');
+      DELETE FROM public.files;
+      INSERT INTO public.files (page_slug) VALUES ('kept-by-decoy-proof');
     `);
-    await attemptMigration(appEngine, MIGRATIONS.find((m) => m.version === 23)!);
-    const active = await tempAdmin<{ exists: boolean }[]>`
-      SELECT EXISTS (
-        SELECT 1 FROM pg_constraint
-         WHERE conname = 'files_page_slug_fkey'
-           AND conrelid = 'groundcontrol.files'::regclass
-      ) AS exists`;
-    expect(active[0]?.exists).toBe(false);
+    const v23 = MIGRATIONS.find((m) => m.version === 23)!;
+    const captured: string[] = [];
+    await v23.handler!({
+      kind: 'postgres',
+      transaction: async (fn: (tx: unknown) => Promise<void>) => fn({
+        runMigration: async (_version: number, sql: string) => { captured.push(sql); },
+      }),
+    } as never);
+    const probe = scopeMigrationCatalogProbes(captured[0]!);
+    expect(probe).toContain('table_schema = current_schema()');
+
+    const conn = (appEngine as unknown as { sql: ReturnType<typeof postgres> }).sql;
+    await conn.unsafe(probe);
+    const publicState = await tempAdmin<{ page_slug: string; sentinel: string; constraint_present: boolean }[]>`
+      SELECT f.page_slug, f.sentinel,
+             EXISTS (
+               SELECT 1 FROM pg_constraint
+                WHERE conname = 'files_page_slug_fkey'
+                  AND conrelid = 'public.files'::regclass
+             ) AS constraint_present
+        FROM public.files f`;
+    expect([...publicState]).toEqual([{
+      page_slug: 'kept-by-decoy-proof', sentinel: 'unchanged', constraint_present: true,
+    }]);
   }, 60_000);
 
   test('retrieval column decoy is ignored and v91 owns active trigger placement', async () => {

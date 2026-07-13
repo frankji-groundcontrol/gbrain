@@ -50,6 +50,7 @@ export interface IndexSpec {
 
 export interface ActiveBuildInfo {
   active: boolean;
+  status?: 'inactive' | 'active' | 'unknown';
   pid?: number;
   query?: string;
   application_name?: string;
@@ -65,7 +66,7 @@ export async function checkActiveBuild(
   indexName: string,
   tableName: string,
 ): Promise<ActiveBuildInfo> {
-  if (engine.kind !== 'postgres') return { active: false };
+  if (engine.kind !== 'postgres') return { active: false, status: 'inactive' };
   try {
     const rows = await engine.executeRaw<{ pid: number; query: string; application_name: string | null }>(
       `SELECT a.pid, a.query, a.application_name
@@ -83,16 +84,17 @@ export async function checkActiveBuild(
         LIMIT 1`,
       [tableName, indexName],
     );
-    if (rows.length === 0) return { active: false };
+    if (rows.length === 0) return { active: false, status: 'inactive' };
     const r = rows[0];
     return {
       active: true,
+      status: 'active',
       pid: r.pid,
       query: r.query,
       application_name: r.application_name ?? undefined,
     };
   } catch {
-    return { active: false };
+    return { active: false, status: 'unknown' };
   }
 }
 
@@ -128,8 +130,12 @@ export async function dropZombieIndexes(
     for (const r of rows) {
       // Guard: skip if there's an active build for this index.
       const active = await checkActiveBuild(engine, r.indexname, r.tablename);
-      if (active.active) {
-        process.stderr.write(`[hnsw] skipping zombie cleanup of ${r.indexname} — active build (pid ${active.pid})\n`);
+      if (active.status !== 'inactive') {
+        process.stderr.write(
+          active.active
+            ? `[hnsw] skipping zombie cleanup of ${r.indexname} — active build (pid ${active.pid})\n`
+            : `[hnsw] skipping zombie cleanup of ${r.indexname} — build status unknown\n`,
+        );
         continue;
       }
       try {
@@ -174,6 +180,10 @@ export async function dropAndRebuild(
   }
 
   const active = await checkActiveBuild(engine, spec.name, spec.table);
+  if (active.status === 'unknown') {
+    process.stderr.write(`[hnsw] dropAndRebuild ${spec.name} aborted: build status unknown.\n`);
+    return { rebuilt: false, tempName: spec.name };
+  }
   if (active.active && !opts.force) {
     process.stderr.write(
       `[hnsw] dropAndRebuild ${spec.name} aborted: active build pid ${active.pid} (${active.application_name ?? 'unknown'}). Pass --force to proceed anyway.\n`,
