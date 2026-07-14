@@ -28,8 +28,9 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { isAbsolute } from 'node:path';
+import { isAbsolute, resolve as resolvePath } from 'node:path';
 import { SSRFError, fetchWithSSRFGuard } from '../ssrf-validate.ts';
+import { isPathContained } from '../path-confine.ts';
 
 /** Max bytes for input image. Configurable via `search.image_query.max_bytes`. */
 export const DEFAULT_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
@@ -103,6 +104,27 @@ export async function loadImageInput(
     'INVALID_URL',
     `Unsupported image input shape: expected data: URI, http(s):// URL, file:// URI, or absolute path. Got: ${input.slice(0, 60)}`,
   );
+}
+
+/**
+ * Load a stored source asset for reranking only when it remains inside its
+ * registered source root after realpath resolution. `storage_path` is DB
+ * metadata, never a trusted filesystem path, so every failure deliberately
+ * degrades to null and lets retrieval use the result's text instead.
+ */
+export async function loadSourceImageCandidate(
+  sourceRoot: string | null | undefined,
+  storagePath: string,
+  opts: ImageLoadOpts = {},
+): Promise<LoadedImage | null> {
+  if (!sourceRoot || !storagePath) return null;
+  const candidate = resolvePath(sourceRoot, storagePath);
+  if (!isPathContained(candidate, sourceRoot)) return null;
+  try {
+    return await loadImageInput(candidate, opts);
+  } catch {
+    return null;
+  }
 }
 
 async function loadLocalPath(path: string, maxBytes: number): Promise<LoadedImage> {

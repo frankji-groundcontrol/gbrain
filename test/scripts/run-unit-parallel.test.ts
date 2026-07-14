@@ -30,6 +30,7 @@ const REPO_ROOT = resolve(import.meta.dir, '..', '..');
 const PARALLEL_SH_SRC = resolve(REPO_ROOT, 'scripts/run-unit-parallel.sh');
 const SHARD_SH_SRC = resolve(REPO_ROOT, 'scripts/run-unit-shard.sh');
 const SERIAL_SH_SRC = resolve(REPO_ROOT, 'scripts/run-serial-tests.sh');
+const SNAPSHOT_BUILDER_SRC = resolve(REPO_ROOT, 'scripts/build-pglite-snapshot.ts');
 
 let TMPROOT: string;
 
@@ -83,6 +84,26 @@ function runWrapper(extraArgs: string[] = []): { code: number; stdout: string; s
 }
 
 describe('run-unit-parallel.sh exit-code propagation (a)', () => {
+  it('builds the PGLite snapshot with the Bun test suite legacy embedding width', () => {
+    const src = readFileSync(SNAPSHOT_BUILDER_SRC, 'utf-8');
+    expect(src).toContain("embedding_model: 'openai:text-embedding-3-large'");
+    expect(src).toContain('embedding_dimensions: 1536');
+  });
+
+  it('defaults to one shard with one Bun worker', () => {
+    const src = readFileSync(PARALLEL_SH_SRC, 'utf-8');
+    expect(src).toMatch(
+      /GBRAIN_TEST_MAX_CONCURRENCY:-1/,
+    );
+    expect(src).toMatch(
+      /N="\$\{SHARDS_OVERRIDE:-\$\{SHARDS:-1\}\}"/,
+    );
+    expect(src).toContain('GBRAIN_PGLITE_SNAPSHOT=test/fixtures/pglite-snapshot.tar');
+    expect(src).toContain('if ! bun run build:pglite-snapshot; then');
+    expect(src).toContain('GBRAIN_SKIP_COLD_PGLITE_TESTS=1');
+    expect(src).toContain('GBRAIN_TEST_FILES_PER_PROCESS="${GBRAIN_TEST_FILES_PER_PROCESS:-8}"');
+  });
+
   it('exits non-zero when any shard contains a failing test', () => {
     const r = runWrapper();
     expect(r.code).not.toBe(0);

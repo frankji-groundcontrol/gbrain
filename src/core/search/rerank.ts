@@ -18,9 +18,20 @@
  */
 
 import { createHash } from 'crypto';
+import type { BrainEngine } from '../engine.ts';
 import type { SearchResult } from '../types.ts';
-import { rerank as gatewayRerank, RerankError, type RerankInput, type RerankResult } from '../ai/gateway.ts';
+import {
+  rerank as gatewayRerank,
+  RerankError,
+  type RerankContent,
+  type RerankInput,
+  type RerankResult,
+} from '../ai/gateway.ts';
 import { logRerankFailure, type RerankFailureReason } from '../rerank-audit.ts';
+import { loadSourceImageCandidate } from './image-loader.ts';
+
+const MAX_RERANK_IMAGE_CANDIDATES = 4;
+const MAX_RERANK_IMAGE_BYTES = 1024 * 1024;
 
 export interface RerankerOpts {
   enabled: boolean;
@@ -39,8 +50,79 @@ export interface RerankerOpts {
   rerankerFn?: (input: RerankInput) => Promise<RerankResult[]>;
 }
 
+export type RerankDocumentResolver = (
+  results: SearchResult[],
+) => Promise<Array<string | RerankContent>>;
+
+export function isDashscopeVlReranker(model: string | undefined): boolean {
+  return model === 'dashscope:qwen3-vl-rerank';
+}
+
+function textCandidate(result: SearchResult): string {
+  return result.chunk_text || result.title || '';
+}
+
+/**
+ * Produces a bounded rich-candidate resolver for the DashScope VL reranker.
+ * File records are untrusted metadata, so a result may use an image only when
+ * its source identity and realpath-confined source root both agree. Every
+ * miss falls back to the already-selected result text.
+ */
+export function makeImageCandidateResolver(engine: BrainEngine): RerankDocumentResolver {
+  return async (results) => {
+    const fallbacks = results.map(textCandidate);
+    let sources: Awaited<ReturnType<BrainEngine['listAllSources']>>;
+    try {
+      sources = await engine.listAllSources();
+    } catch {
+      return fallbacks;
+    }
+    const roots = new Map(sources.map(source => [source.id, source.local_path]));
+    let imagesUsed = 0;
+    const documents: Array<string | RerankContent> = [];
+    for (const result of results) {
+      const sourceId = result.source_id;
+      const sourceRoot = sourceId ? roots.get(sourceId) : null;
+      if (!sourceId || !sourceRoot || imagesUsed >= MAX_RERANK_IMAGE_CANDIDATES) {
+        documents.push(textCandidate(result));
+        continue;
+      }
+      try {
+        const files = await engine.listFilesForPage(result.page_id);
+        const file = files
+          .filter(candidate => candidate.source_id === sourceId)
+          .sort((a, b) => a.storage_path.localeCompare(b.storage_path))
+          .find(candidate => candidate.mime_type?.startsWith('image/'));
+        if (!file) {
+          documents.push(textCandidate(result));
+          continue;
+        }
+        const loaded = await loadSourceImageCandidate(sourceRoot, file.storage_path, {
+          maxBytes: MAX_RERANK_IMAGE_BYTES,
+        });
+        if (!loaded) {
+          documents.push(textCandidate(result));
+          continue;
+        }
+        imagesUsed++;
+        documents.push({
+          kind: 'image_base64',
+          data: loaded.base64,
+          mime: loaded.contentType,
+        });
+      } catch {
+        documents.push(textCandidate(result));
+      }
+    }
+    return documents;
+  };
+}
+
 /** SHA-256 prefix (8 chars) of the query text for privacy-preserving audit. */
-function hashQuery(query: string): string {
+function hashQuery(query: string | RerankContent): string {
+  // Image bytes must never reach local audit records. The modality marker is
+  // enough to correlate a failure class without retaining user content.
+  if (typeof query !== 'string') return query.kind === 'image_base64' ? 'image' : 'text';
   return createHash('sha256').update(query, 'utf8').digest('hex').slice(0, 8);
 }
 
@@ -56,9 +138,10 @@ function hashQuery(query: string): string {
  * Empty input passes through immediately (no upstream call).
  */
 export async function applyReranker(
-  query: string,
+  query: string | RerankContent,
   results: SearchResult[],
   opts: RerankerOpts,
+  resolveDocuments?: RerankDocumentResolver,
 ): Promise<SearchResult[]> {
   if (!opts.enabled || results.length === 0) return results;
   // No documents to rerank when topNIn=0 — pass through (defensive; mode
@@ -71,10 +154,15 @@ export async function applyReranker(
   // Document text — chunk_text is the matched span. Fall back to title if
   // empty (shouldn't happen in practice; defensive). Empty docs would
   // confuse the reranker, but we still send them — the upstream model decides.
-  const documents = head.map(r => r.chunk_text || r.title || '');
-
   let reranked: RerankResult[];
+  let documents: Array<string | RerankContent> = head.map(textCandidate);
   try {
+    if (resolveDocuments) {
+      documents = await resolveDocuments(head);
+      if (documents.length !== head.length) {
+        throw new RerankError('rerank document resolver returned a mismatched candidate count', 'unknown');
+      }
+    }
     const rerankerFn = opts.rerankerFn ?? gatewayRerank;
     reranked = await rerankerFn({
       query,

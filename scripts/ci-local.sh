@@ -12,8 +12,10 @@
 #   bash scripts/ci-local.sh --no-shard   # debug: run E2E sequentially against postgres-1 only
 #
 # 4-way E2E sharding: 4 pgvector services on host ports 5434-5437. The 36 E2E
-# files split N/4 per shard; shards run in parallel. Within a shard, files run
-# sequentially (TRUNCATE CASCADE no-race property documented in run-e2e.sh).
+# files split N/4 per shard; shards run in parallel. Unit shards use one Bun
+# worker each, capping test-file concurrency at four lanes. E2E files within a
+# shard run sequentially (TRUNCATE CASCADE no-race property
+# documented in run-e2e.sh).
 # Wall-time on a 16-core host: ~6 min sequential -> ~1.5-2 min sharded.
 #
 # Stronger than PR CI: PR CI runs only Tier 1's 2 files; this runs all 36.
@@ -236,12 +238,8 @@ bash scripts/check-progress-to-stdout.sh
 bash scripts/check-trailing-newline.sh
 bash scripts/check-wasm-embedded.sh
 bun run typecheck
-echo \"[runner] Tier 3: building PGLite snapshot fixture (cached across reruns)\"
-if [ ! -f test/fixtures/pglite-snapshot.tar ] || [ ! -f test/fixtures/pglite-snapshot.version ]; then
-  bun run build:pglite-snapshot
-else
-  echo \"[runner] snapshot fixture exists; engine will validate hash at load time\"
-fi
+echo \"[runner] Tier 3: building PGLite snapshot fixture\"
+bun run build:pglite-snapshot
 export GBRAIN_PGLITE_SNAPSHOT=test/fixtures/pglite-snapshot.tar
 echo \"[runner] resolving E2E file selection (--diff aware)\"
 ${DIFF_E2E_PREP}
@@ -253,7 +251,7 @@ printf '%s\\n' 1 2 3 4 | xargs -P4 -I{} sh -c '
   log=/tmp/shard-logs/shard-\${shard}.log
   echo \"[shard \${shard}] start\" > \$log
   echo \"[shard \${shard}] unit phase (SHARD=\${shard}/4, DATABASE_URL unset)\" >> \$log
-  env -u DATABASE_URL SHARD=\${shard}/4 bash scripts/run-unit-shard.sh >> \$log 2>&1
+  env -u DATABASE_URL GBRAIN_TEST_FILES_PER_PROCESS=8 SHARD=\${shard}/4 bash scripts/run-unit-shard.sh --max-concurrency=1 >> \$log 2>\\&1
   unit_exit=\$?
   if [ \$unit_exit -ne 0 ]; then
     echo \"[shard \${shard}] UNIT FAILED (exit=\$unit_exit)\" >> \$log
@@ -263,15 +261,17 @@ printf '%s\\n' 1 2 3 4 | xargs -P4 -I{} sh -c '
   if [ -s /tmp/e2e-selected.txt ]; then
     SHARD=\${shard}/4 \\
     DATABASE_URL=postgresql://postgres:postgres@postgres-\${shard}:5432/gbrain_test \\
+    GBRAIN_TEST_DB=1 \\
     GBRAIN_PGBOUNCER_URL=postgresql://postgres:postgres@pgbouncer:5432/gbrain_pgbouncer \\
     GBRAIN_PGBOUNCER_DIRECT_URL=postgresql://postgres:postgres@postgres-1:5432/gbrain_test \\
-    xargs -a /tmp/e2e-selected.txt bash scripts/run-e2e.sh >> \$log 2>&1
+    xargs -a /tmp/e2e-selected.txt bash scripts/run-e2e.sh >> \$log 2>\\&1
   else
     SHARD=\${shard}/4 \\
     DATABASE_URL=postgresql://postgres:postgres@postgres-\${shard}:5432/gbrain_test \\
+    GBRAIN_TEST_DB=1 \\
     GBRAIN_PGBOUNCER_URL=postgresql://postgres:postgres@pgbouncer:5432/gbrain_pgbouncer \\
     GBRAIN_PGBOUNCER_DIRECT_URL=postgresql://postgres:postgres@postgres-1:5432/gbrain_test \\
-    bash scripts/run-e2e.sh >> \$log 2>&1
+    bash scripts/run-e2e.sh >> \$log 2>\\&1
   fi
   e2e_exit=\$?
   if [ \$e2e_exit -ne 0 ]; then
@@ -350,7 +350,7 @@ if [ -f .git ]; then
 fi
 
 echo "[ci-local] Running checks inside runner container..."
-docker compose -f "$COMPOSE_FILE" run --rm "${EXTRA_MOUNTS[@]:-}" runner bash -c "$INNER_CMD"
+docker compose -f "$COMPOSE_FILE" run --rm "${EXTRA_MOUNTS[@]}" runner bash -c "$INNER_CMD"
 
 echo ""
 echo "[ci-local] All checks passed."

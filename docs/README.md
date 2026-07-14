@@ -78,7 +78,8 @@ Agent operating protocols (the GBrain Skillpack family, indexed by
   [cron-schedule](guides/cron-schedule.md).
 - Operations & deployment: [live-sync](guides/live-sync.md),
   [custom-schema-deployment](guides/custom-schema-deployment.md) (run the
-  brain in a dedicated Postgres schema; Supabase search_path + IPv6 notes),
+  brain in a legacy URL-pinned schema or the restricted `groundcontrol`
+  runtime mode; Supabase provisioning, search_path, and IPv6 notes),
   [multi-source-brains](guides/multi-source-brains.md),
   [minions-deployment](guides/minions-deployment.md),
   [minions-shell-jobs](guides/minions-shell-jobs.md),
@@ -174,7 +175,8 @@ are added, not rewritten.
 - [practices/](practices/README.md) — reusable setups, command sequences, and
   operational methods.
 - [issues/](issues/README.md) — concrete implementation-issue records and
-  improvement backlogs.
+  improvement backlogs, including the resolved DashScope Vision Plus native
+  multimodal rollout.
 - [updates/](updates/README.md) — one file per shipped, user-facing change; the
   modular per-change home that feeds the version-stamped `CHANGELOG.md` at
   release time.

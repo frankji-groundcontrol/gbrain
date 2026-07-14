@@ -316,6 +316,7 @@ export function rowToChunk(row: Record<string, unknown>, includeEmbedding = fals
     chunk_text: row.chunk_text as string,
     chunk_source: row.chunk_source as 'compiled_truth' | 'timeline' | 'fenced_code',
     embedding: includeEmbedding ? parseEmbedding(row.embedding) : null,
+    embedding_multimodal: row.embedding_multimodal ? parseEmbedding(row.embedding_multimodal) : null,
     model: row.model as string,
     token_count: row.token_count as number | null,
     embedded_at: row.embedded_at ? new Date(row.embedded_at as string) : null,

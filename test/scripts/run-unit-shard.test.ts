@@ -15,6 +15,7 @@
 
 import { describe, it, expect } from 'bun:test';
 import { execFileSync } from 'child_process';
+import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
 const REPO_ROOT = resolve(import.meta.dir, '..', '..');
@@ -52,5 +53,18 @@ describe('run-unit-shard.sh exclusion symmetry', () => {
     const files = dryRunList();
     const leaks = files.filter(f => f.startsWith('test/e2e/'));
     expect(leaks).toEqual([]);
+  });
+
+  it('uses a clean home and no ambient embedding credentials', () => {
+    const src = readFileSync(SHARD_SH, 'utf-8');
+    expect(src).toMatch(/test_home=\$\(mktemp -d\)/);
+    expect(src).toMatch(/env -u GBRAIN_HOME -u OPENAI_API_KEY -u DASHSCOPE_API_KEY/);
+    expect(src).toMatch(/HOME="\$test_home" bun test/);
+    expect(src).toContain('HOME="$test_home" git config --global --add safe.directory "$PWD"');
+    expect(src).toContain('snapshot_opt_out=("${cold_bootstrap_files[@]}")');
+    expect(src).toContain('cold_bootstrap_files=("test/bootstrap.test.ts"');
+    expect(src).toContain('for f in "${cold_files[@]}"; do');
+    expect(src).toContain('GBRAIN_SKIP_COLD_PGLITE_TESTS');
+    expect(src).toContain('GBRAIN_TEST_FILES_PER_PROCESS');
   });
 });

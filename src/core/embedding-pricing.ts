@@ -35,12 +35,16 @@ export const EMBEDDING_PRICING: Record<string, EmbeddingPricing> = {
   'voyage:voyage-3-large':         { pricePerMTok: 0.18 },
   'voyage:voyage-3':               { pricePerMTok: 0.06 },
   'voyage:voyage-4-large':         { pricePerMTok: 0.18 },
+  'voyage:voyage-multimodal-3':    { pricePerMTok: 0.18 },
   // ZeroEntropy (https://zeroentropy.dev/pricing — zembed-1)
   'zeroentropyai:zembed-1':        { pricePerMTok: 0.05 },
   // DashScope / Alibaba Model Studio (https://help.aliyun.com/zh/model-studio/embedding,
   // Beijing region ¥0.0005/1K tokens ≈ $0.07/1M at ~7.1 CNY/USD, verified 2026-07-03)
   'dashscope:text-embedding-v4':   { pricePerMTok: 0.07 },
   'dashscope:text-embedding-v3':   { pricePerMTok: 0.07 },
+  // Vision Plus: ¥0.0005/1K input tokens ≈ $0.07/1M at 7.1 CNY/USD,
+  // https://help.aliyun.com/zh/model-studio/embedding (verified 2026-07-13).
+  'dashscope:tongyi-embedding-vision-plus-2026-03-06': { pricePerMTok: 0.07 },
 };
 
 export type PriceLookupResult =

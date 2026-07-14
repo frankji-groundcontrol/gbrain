@@ -568,6 +568,8 @@ export interface Chunk {
   chunk_text: string;
   chunk_source: 'compiled_truth' | 'timeline' | 'fenced_code';
   embedding: Float32Array | null;
+  /** Shared 1024d text-and-image vector used by unified multimodal search. */
+  embedding_multimodal?: Float32Array | null;
   model: string;
   token_count: number | null;
   embedded_at: Date | null;
@@ -650,6 +652,8 @@ export interface ChunkInput {
    */
   modality?: 'text' | 'image';
   embedding_image?: Float32Array;
+  /** v0.36 unified multimodal vector (fixed at 1024 dimensions). */
+  embedding_multimodal?: Float32Array;
   /**
    * v0.19.0: optional code-chunk metadata. Populated by importCodeFile from
    * the tree-sitter AST; NULL for markdown chunks. Drives `query --lang`,
@@ -1074,7 +1078,14 @@ export interface SearchOpts {
     model?: string;
     timeoutMs?: number;
     // Test seam — never set in production code.
-    rerankerFn?: (input: { query: string; documents: string[]; topN?: number; model?: string; signal?: AbortSignal; timeoutMs?: number }) => Promise<{ index: number; relevanceScore: number }[]>;
+    rerankerFn?: (input: {
+      query: string | { kind: 'text'; text: string } | { kind: 'image_base64'; data: string; mime: string };
+      documents: Array<string | { kind: 'text'; text: string } | { kind: 'image_base64'; data: string; mime: string }>;
+      topN?: number;
+      model?: string;
+      signal?: AbortSignal;
+      timeoutMs?: number;
+    }) => Promise<{ index: number; relevanceScore: number }[]>;
   };
   /**
    * v0.35.6.0 — floor-ratio gate for metadata-axis boost stages.

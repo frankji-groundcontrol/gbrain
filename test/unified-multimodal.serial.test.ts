@@ -23,6 +23,16 @@ import { runReindexMultimodal } from '../src/commands/reindex-multimodal.ts';
 let engine: PGLiteEngine;
 let fetchHandler: ((url: string, init: RequestInit) => Promise<Response>) | null = null;
 const origFetch = globalThis.fetch;
+const testTextColumn = {
+  name: 'embedding',
+  type: 'vector' as const,
+  dimensions: 1536,
+  embeddingModel: 'openai:text-embedding-3-large',
+};
+
+function searchWithTestTextColumn(query: string) {
+  return hybridSearch(engine, query, { limit: 5, embeddingColumn: testTextColumn });
+}
 
 beforeAll(async () => {
   engine = new PGLiteEngine();
@@ -81,6 +91,43 @@ describe('reindex --multimodal command (Phase 3)', () => {
     expect(result.reembedded).toBe(0);
   });
 
+  test('Vision Plus text reindex estimate uses its configured token price', async () => {
+    configureGateway({
+      embedding_model: 'dashscope:text-embedding-v4',
+      embedding_dimensions: 1024,
+      embedding_multimodal_model: 'dashscope:tongyi-embedding-vision-plus-2026-03-06',
+      env: { DASHSCOPE_API_KEY: 'test' },
+    });
+    const text = 'vision plus text';
+    await engine.putPage('notes/vision-plus', {
+      type: 'note', title: 'Vision Plus', compiled_truth: text, timeline: '',
+    });
+    await engine.upsertChunks('notes/vision-plus', [{
+      chunk_index: 0, chunk_text: text, chunk_source: 'compiled_truth', modality: 'text',
+    }]);
+
+    const result = await runReindexMultimodal(engine, { costEstimate: true });
+    expect(result.cost_usd_estimate).toBeCloseTo((Math.ceil(text.length / 3.5) / 1_000_000) * 0.07, 12);
+  });
+
+  test('unknown multimodal-model pricing is reported as unavailable', async () => {
+    configureGateway({
+      embedding_model: 'openai:text-embedding-3-large',
+      embedding_dimensions: 1536,
+      embedding_multimodal_model: 'example:unpriced-model',
+      env: { OPENAI_API_KEY: 'test' },
+    });
+    await engine.putPage('notes/unpriced-model', {
+      type: 'note', title: 'Unpriced model', compiled_truth: 'needs an estimate', timeline: '',
+    });
+    await engine.upsertChunks('notes/unpriced-model', [{
+      chunk_index: 0, chunk_text: 'needs an estimate', chunk_source: 'compiled_truth', modality: 'text',
+    }]);
+
+    const result = await runReindexMultimodal(engine, { costEstimate: true });
+    expect(result.cost_usd_estimate).toBeNull();
+  });
+
   test('GBRAIN_NO_REEMBED=1 honored on zero-pending brain (skip path is no-op-clean)', async () => {
     await withEnv({ GBRAIN_NO_REEMBED: '1' }, async () => {
       const result = await runReindexMultimodal(engine, {});
@@ -119,7 +166,7 @@ describe('hybridSearch unified routing (Phase 3)', () => {
       }), { status: 200 });
     };
 
-    await hybridSearch(engine, 'totally text query', { limit: 5 });
+    await searchWithTestTextColumn('totally text query');
     // Unified routing: text query forced to multimodal endpoint.
     expect(voyageCalled).toBeGreaterThanOrEqual(1);
   });
@@ -140,7 +187,7 @@ describe('hybridSearch unified routing (Phase 3)', () => {
       }), { status: 200 });
     };
 
-    const results = await hybridSearch(engine, 'whatever', { limit: 5 });
+    const results = await searchWithTestTextColumn('whatever');
     expect(Array.isArray(results)).toBe(true);
     // The fall-back path SHOULD call OpenAI (text path) when unified came back empty.
     expect(openaiCalled).toBeGreaterThanOrEqual(1);
@@ -162,7 +209,7 @@ describe('hybridSearch unified routing (Phase 3)', () => {
       }), { status: 200 });
     };
 
-    await hybridSearch(engine, 'whatever', { limit: 5 });
+    await searchWithTestTextColumn('whatever');
     // Strict mode means NO text fallback even when unified is empty.
     expect(openaiCalled).toBe(0);
   });

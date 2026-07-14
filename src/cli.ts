@@ -1735,7 +1735,8 @@ async function handleCliOnly(command: string, args: string[]) {
           if (args.includes('--json')) {
             console.log(JSON.stringify(result, null, 2));
           } else {
-            console.log(`reindex --multimodal: ${result.reembedded} re-embedded, ${result.failed} failed, ${result.pending_after} pending. est. cost: $${result.cost_usd_estimate.toFixed(2)}`);
+            const cost = result.cost_usd_estimate === null ? 'unavailable' : `$${result.cost_usd_estimate.toFixed(2)}`;
+            console.log(`reindex --multimodal: ${result.reembedded} re-embedded, ${result.failed} failed, ${result.pending_after} pending. est. cost: ${cost}`);
           }
           break;
         }

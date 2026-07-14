@@ -40,6 +40,116 @@ instead:
 `https://<workspace>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`).
 `DASHSCOPE_BASE_URL` in the environment also works.
 
+### Workspace-native embedding endpoint
+
+Some workspace keys use the native embedding service rather than the
+OpenAI-compatible path. Set the full service endpoint in the file-plane
+config; gbrain rewrites its OpenAI-shaped request and response automatically:
+
+```json
+"provider_base_urls": {
+  "dashscope": "https://<workspace>.cn-beijing.maas.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
+}
+```
+
+This endpoint is for embeddings only. It expects `input.texts` and returns
+`output.embeddings`, unlike `/compatible-mode/v1/embeddings`.
+
+### Vision Plus unified text-and-image search
+
+`tongyi-embedding-vision-plus-2026-03-06` is a **multimodal-only** model in
+GBrain. Keep `text-embedding-v4` as the primary model and use Vision Plus for
+the separate shared column at 1024 dimensions:
+
+```json
+{
+  "embedding_model": "dashscope:text-embedding-v4",
+  "embedding_dimensions": 1024,
+  "provider_base_urls": {
+    "dashscope": "https://<workspace>.cn-beijing.maas.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
+  }
+}
+```
+
+Then configure and backfill the unified column:
+
+```bash
+gbrain config set embedding_multimodal_model dashscope:tongyi-embedding-vision-plus-2026-03-06
+gbrain reindex --multimodal --yes
+gbrain config set search.unified_multimodal true
+```
+
+When the file-plane URL is the native text service above, GBrain derives its
+same-host multimodal sibling automatically:
+
+```text
+/api/v1/services/embeddings/text-embedding/text-embedding
+→ /api/v1/services/embeddings/multimodal-embedding/multimodal-embedding
+```
+
+The adapter requests 1024 dimensions and sends independent text or image
+inputs only—no provider-side fusion. New image imports save the resulting
+Vision Plus vector to both `embedding_image` and `embedding_multimodal`.
+After enabling the model, rerun ordinary import for existing images to
+backfill the unified vector; `reindex --multimodal` backfills existing text
+chunks. Do not set Vision Plus as `embedding_model`: the standard text endpoint
+cannot serve it.
+
+### Qwen3-VL rerank for text and image search
+
+`qwen3-vl-rerank` is the matching **native-only** DashScope reranker for a
+brain that contains text and images. It uses the same Workspace host and
+`DASHSCOPE_API_KEY` as the embedding configuration above, but it does **not**
+use the embedding endpoint or an OpenAI-compatible rerank route.
+
+Enable it on the DB-backed search configuration plane:
+
+```bash
+gbrain config set search.reranker.model dashscope:qwen3-vl-rerank
+gbrain config set search.reranker.enabled true
+# Optional explicit override; 20 seconds is already the recipe default.
+gbrain config set search.reranker.timeout_ms 20000
+```
+
+GBrain derives the native rerank sibling from either supported file-plane
+DashScope URL, retaining the host and key:
+
+```text
+/api/v1/services/embeddings/text-embedding/text-embedding
+→ /api/v1/services/rerank/text-rerank/text-rerank
+
+/compatible-mode/v1
+→ /api/v1/services/rerank/text-rerank/text-rerank
+```
+
+For normal text search, the model reranks text chunks and, when a retrieved
+result is an eligible local image asset, can rank that image against the text
+query. For `gbrain search-by-image`, it reranks the supplied image against a
+mix of returned images and text chunks. Optional text refinement stays in the
+existing RRF retrieval step because Alibaba's rerank request accepts one query
+modality per request, not a fused image-plus-text query.
+
+This is a deliberately bounded hot-path call: GBrain reads candidate assets
+sequentially, sends at most four, and caps each at 1 MiB. Each candidate must
+belong to the already selected source and resolve inside that source's
+registered `local_path`; missing, unsupported, storage-only, over-cap, or
+unsafe paths fall back to the result's text. Video is not sent. A rerank
+failure, provider limit, or timeout leaves the initial retrieval order intact.
+
+The selected query, text chunks, and eligible image bytes are sent to your
+DashScope Workspace for this paid provider request. They are never placed in
+GBrain's rerank audit log; text audit entries use a short hash and image
+queries are recorded only as an image marker. Alibaba documents the native
+request/response shape and limits (100 text documents, 40 images, 8,000 tokens
+per item, and 120,000 tokens per request) in its
+[Qwen3-VL rerank API reference](https://help.aliyun.com/en/model-studio/text-rerank-api).
+
+Verify the configuration (this makes a minimal provider request):
+
+```bash
+gbrain models doctor --json | jq '.probes[] | select(.touchpoint == "reranker_config")'
+```
+
 **3. The key needs to reach daemon-spawned processes.** `DASHSCOPE_API_KEY`
 in `~/.zshrc` never reaches MCP-serve/launchd/cron gbrain processes. Use the
 file-plane slot (same pattern as `zeroentropy_api_key`):
@@ -92,7 +202,7 @@ All paths are `/compatible-mode/v1` for the OpenAI-compatible surface.
   "engine": "postgres",
   "database_url": "postgresql://...",
   "embedding_model": "dashscope:text-embedding-v4",
-  "embedding_dimensions": 1536,
+  "embedding_dimensions": 1024,
   "dashscope_api_key": "sk-...",
   "provider_base_urls": {
     "dashscope": "https://<workspace>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"

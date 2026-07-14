@@ -38,6 +38,16 @@ function configureZE(model: string = 'zeroentropyai:zerank-2'): void {
   });
 }
 
+function configureDashscopeReranker(): void {
+  configureGateway({
+    reranker_model: 'dashscope:qwen3-vl-rerank',
+    base_urls: {
+      dashscope: 'https://workspace-example.cn-beijing.maas.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding',
+    },
+    env: { DASHSCOPE_API_KEY: 'test-dashscope-key' },
+  });
+}
+
 function mockResp(json: unknown, status = 200): Response {
   return new Response(JSON.stringify(json), {
     status,
@@ -407,5 +417,103 @@ describe('gateway.rerank() — v0.40.6.1 path regression: zerank-1-small unaffec
     });
     await rerank({ query: 'q', documents: ['d'] });
     expect(capturedUrl.endsWith('/models/rerank')).toBe(true);
+  });
+});
+
+describe('gateway.rerank() — DashScope qwen3-vl-rerank native adapter', () => {
+  beforeEach(() => configureDashscopeReranker());
+
+  test('derives the native sibling URL and sends the text-only native shape', async () => {
+    let capturedUrl = '';
+    let capturedBody: any;
+    let capturedAuth = '';
+    __setRerankTransportForTests(async (url, init) => {
+      capturedUrl = url;
+      capturedBody = JSON.parse(init.body as string);
+      capturedAuth = new Headers(init.headers).get('authorization') ?? '';
+      return mockResp({
+        output: { results: [{ index: 1, relevance_score: 0.9 }, { index: 0, relevance_score: 0.1 }] },
+      });
+    });
+
+    const out = await rerank({ query: 'query', documents: ['first', 'second'] });
+
+    expect(capturedUrl).toBe('https://workspace-example.cn-beijing.maas.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank');
+    expect(capturedAuth).toBe('Bearer test-dashscope-key');
+    expect(capturedBody).toEqual({
+      model: 'qwen3-vl-rerank',
+      input: {
+        query: { text: 'query' },
+        documents: [{ text: 'first' }, { text: 'second' }],
+      },
+      parameters: { return_documents: false },
+    });
+    expect(out).toEqual([
+      { index: 1, relevanceScore: 0.9 },
+      { index: 0, relevanceScore: 0.1 },
+    ]);
+  });
+
+  test('accepts a base64 image query and image document without changing generic providers', async () => {
+    let capturedBody: any;
+    __setRerankTransportForTests(async (_url, init) => {
+      capturedBody = JSON.parse(init.body as string);
+      return mockResp({ output: { results: [{ index: 0, relevance_score: 1 }] } });
+    });
+
+    const out = await rerank({
+      query: { kind: 'image_base64', data: 'aGVsbG8=', mime: 'image/png' } as any,
+      documents: [
+        { kind: 'image_base64', data: 'd29ybGQ=', mime: 'image/png' } as any,
+        'text fallback',
+      ],
+    });
+
+    expect(capturedBody.input.query).toEqual({ image: 'data:image/png;base64,aGVsbG8=' });
+    expect(capturedBody.input.documents).toEqual([
+      { image: 'data:image/png;base64,d29ybGQ=' },
+      { text: 'text fallback' },
+    ]);
+    expect(out).toEqual([{ index: 0, relevanceScore: 1 }]);
+  });
+
+  test('derives the native rerank path from a compatible-mode Workspace URL too', async () => {
+    configureGateway({
+      reranker_model: 'dashscope:qwen3-vl-rerank',
+      base_urls: { dashscope: 'https://workspace-example.cn-beijing.maas.aliyuncs.com/compatible-mode/v1' },
+      env: { DASHSCOPE_API_KEY: 'test-dashscope-key' },
+    });
+    let capturedUrl = '';
+    __setRerankTransportForTests(async (url) => {
+      capturedUrl = url;
+      return mockResp({ output: { results: [{ index: 0, relevance_score: 1 }] } });
+    });
+
+    await rerank({ query: 'query', documents: ['document'] });
+
+    expect(capturedUrl).toBe('https://workspace-example.cn-beijing.maas.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank');
+  });
+
+  test('rejects more than forty image documents before HTTP', async () => {
+    let called = false;
+    __setRerankTransportForTests(async () => {
+      called = true;
+      return mockResp({ output: { results: [] } });
+    });
+    const images = Array.from({ length: 41 }, () => ({
+      kind: 'image_base64' as const, data: 'aGVsbG8=', mime: 'image/png',
+    }));
+
+    await expect(rerank({ query: 'query', documents: images })).rejects.toMatchObject({
+      reason: 'payload_too_large',
+    });
+    expect(called).toBe(false);
+  });
+
+  test('rejects a malformed native response without accepting the generic results shape', async () => {
+    __setRerankTransportForTests(async () => mockResp({ results: [{ index: 0, relevance_score: 1 }] }));
+    await expect(rerank({ query: 'query', documents: ['document'] })).rejects.toMatchObject({
+      reason: 'unknown',
+    });
   });
 });

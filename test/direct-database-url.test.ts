@@ -11,12 +11,13 @@
  * toEngineConfig → ConnectionManager opts.directUrl.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { ConnectionManager, deriveDirectUrl } from '../src/core/connection-manager.ts';
 import { loadConfig, toEngineConfig } from '../src/core/config.ts';
+import { withEnv } from './helpers/with-env.ts';
 
 const POOLER_URL =
   'postgresql://postgres.someref:pw@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres';
@@ -24,95 +25,88 @@ const SESSION_URL =
   'postgresql://postgres.someref:pw@aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres?search_path=gbrain';
 
 describe('ConnectionManager directUrl precedence', () => {
-  const savedEnv = process.env.GBRAIN_DIRECT_DATABASE_URL;
-  afterEach(() => {
-    if (savedEnv === undefined) delete process.env.GBRAIN_DIRECT_DATABASE_URL;
-    else process.env.GBRAIN_DIRECT_DATABASE_URL = savedEnv;
+  test('opts.directUrl (config-resolved) beats env and derive', async () => {
+    await withEnv({ GBRAIN_DIRECT_DATABASE_URL: 'postgresql://env-wins@example.com:5432/x' }, () => {
+      const cm = new ConnectionManager({ url: POOLER_URL, directUrl: SESSION_URL });
+      expect(cm.resolveDirectUrl()).toBe(SESSION_URL);
+    });
   });
 
-  test('opts.directUrl (config-resolved) beats env and derive', () => {
-    process.env.GBRAIN_DIRECT_DATABASE_URL = 'postgresql://env-wins@example.com:5432/x';
-    const cm = new ConnectionManager({ url: POOLER_URL, directUrl: SESSION_URL });
-    expect(cm.resolveDirectUrl()).toBe(SESSION_URL);
+  test('env override still works when no opts.directUrl given', async () => {
+    await withEnv({ GBRAIN_DIRECT_DATABASE_URL: SESSION_URL }, () => {
+      const cm = new ConnectionManager({ url: POOLER_URL });
+      expect(cm.resolveDirectUrl()).toBe(SESSION_URL);
+    });
   });
 
-  test('env override still works when no opts.directUrl given', () => {
-    process.env.GBRAIN_DIRECT_DATABASE_URL = SESSION_URL;
-    const cm = new ConnectionManager({ url: POOLER_URL });
-    expect(cm.resolveDirectUrl()).toBe(SESSION_URL);
+  test('dedicated mode rejects a conflicting env direct URL before pool construction', async () => {
+    await withEnv({ GBRAIN_DIRECT_DATABASE_URL: 'postgresql://u:p@h:5432/db?search_path=public' }, () => {
+      expect(() => new ConnectionManager({
+        url: POOLER_URL,
+        postgresSchema: 'groundcontrol',
+      })).toThrow('search_path must be exactly "groundcontrol,extensions"');
+    });
   });
 
-  test('dedicated mode rejects a conflicting env direct URL before pool construction', () => {
-    process.env.GBRAIN_DIRECT_DATABASE_URL =
-      'postgresql://u:p@h:5432/db?search_path=public';
-    expect(() => new ConnectionManager({
-      url: POOLER_URL,
-      postgresSchema: 'groundcontrol',
-    })).toThrow('search_path must be exactly "groundcontrol,extensions"');
-  });
-
-  test('falls back to derived direct URL when neither opts nor env set', () => {
-    delete process.env.GBRAIN_DIRECT_DATABASE_URL;
-    const cm = new ConnectionManager({ url: POOLER_URL });
-    expect(cm.resolveDirectUrl()).toBe(deriveDirectUrl(POOLER_URL));
-    expect(cm.resolveDirectUrl()).toContain('db.someref.supabase.co');
+  test('falls back to derived direct URL when neither opts nor env set', async () => {
+    await withEnv({ GBRAIN_DIRECT_DATABASE_URL: undefined }, () => {
+      const cm = new ConnectionManager({ url: POOLER_URL });
+      expect(cm.resolveDirectUrl()).toBe(deriveDirectUrl(POOLER_URL));
+      expect(cm.resolveDirectUrl()).toContain('db.someref.supabase.co');
+    });
   });
 });
 
 describe('loadConfig direct_database_url plumbing', () => {
-  let home: string;
-  const saved = {
-    GBRAIN_HOME: process.env.GBRAIN_HOME,
-    GBRAIN_DIRECT_DATABASE_URL: process.env.GBRAIN_DIRECT_DATABASE_URL,
-    GBRAIN_DATABASE_URL: process.env.GBRAIN_DATABASE_URL,
-    DATABASE_URL: process.env.DATABASE_URL,
-  };
-
-  beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), 'gbrain-direct-url-'));
+  async function withConfig<T>(fn: (home: string) => T | Promise<T>): Promise<T> {
+    const home = mkdtempSync(join(tmpdir(), 'gbrain-direct-url-'));
     mkdirSync(join(home, '.gbrain'), { recursive: true });
-    process.env.GBRAIN_HOME = home;
-    delete process.env.GBRAIN_DIRECT_DATABASE_URL;
-    delete process.env.GBRAIN_DATABASE_URL;
-    delete process.env.DATABASE_URL;
-  });
-
-  afterEach(() => {
-    for (const [k, v] of Object.entries(saved)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
+    try {
+      return await withEnv({
+        GBRAIN_HOME: home,
+        GBRAIN_DIRECT_DATABASE_URL: undefined,
+        GBRAIN_DATABASE_URL: undefined,
+        DATABASE_URL: undefined,
+      }, () => fn(home));
+    } finally {
+      rmSync(home, { recursive: true, force: true });
     }
-    rmSync(home, { recursive: true, force: true });
-  });
+  }
 
-  function writeConfig(obj: Record<string, unknown>): void {
+  function writeConfig(home: string, obj: Record<string, unknown>): void {
     writeFileSync(join(home, '.gbrain', 'config.json'), JSON.stringify(obj));
   }
 
-  test('file-plane direct_database_url surfaces in loadConfig result', () => {
-    writeConfig({ engine: 'postgres', database_url: POOLER_URL, direct_database_url: SESSION_URL });
-    const cfg = loadConfig();
-    expect(cfg?.direct_database_url).toBe(SESSION_URL);
+  test('file-plane direct_database_url surfaces in loadConfig result', async () => {
+    await withConfig((home) => {
+      writeConfig(home, { engine: 'postgres', database_url: POOLER_URL, direct_database_url: SESSION_URL });
+      expect(loadConfig()?.direct_database_url).toBe(SESSION_URL);
+    });
   });
 
-  test('env GBRAIN_DIRECT_DATABASE_URL wins over the file value', () => {
-    writeConfig({ engine: 'postgres', database_url: POOLER_URL, direct_database_url: SESSION_URL });
-    process.env.GBRAIN_DIRECT_DATABASE_URL = 'postgresql://env@example.com:5432/x';
-    const cfg = loadConfig();
-    expect(cfg?.direct_database_url).toBe('postgresql://env@example.com:5432/x');
+  test('env GBRAIN_DIRECT_DATABASE_URL wins over the file value', async () => {
+    await withConfig(async (home) => {
+      writeConfig(home, { engine: 'postgres', database_url: POOLER_URL, direct_database_url: SESSION_URL });
+      await withEnv({ GBRAIN_DIRECT_DATABASE_URL: 'postgresql://env@example.com:5432/x' }, () => {
+        expect(loadConfig()?.direct_database_url).toBe('postgresql://env@example.com:5432/x');
+      });
+    });
   });
 
-  test('toEngineConfig threads direct_database_url through to the engine', () => {
-    writeConfig({ engine: 'postgres', database_url: POOLER_URL, direct_database_url: SESSION_URL });
-    const cfg = loadConfig()!;
-    expect(toEngineConfig(cfg).direct_database_url).toBe(SESSION_URL);
+  test('toEngineConfig threads direct_database_url through to the engine', async () => {
+    await withConfig((home) => {
+      writeConfig(home, { engine: 'postgres', database_url: POOLER_URL, direct_database_url: SESSION_URL });
+      expect(toEngineConfig(loadConfig()!).direct_database_url).toBe(SESSION_URL);
+    });
   });
 
-  test('absent everywhere stays undefined (derive path untouched)', () => {
-    writeConfig({ engine: 'postgres', database_url: POOLER_URL });
-    const cfg = loadConfig()!;
-    expect(cfg.direct_database_url).toBeUndefined();
-    expect(toEngineConfig(cfg).direct_database_url).toBeUndefined();
+  test('absent everywhere stays undefined (derive path untouched)', async () => {
+    await withConfig((home) => {
+      writeConfig(home, { engine: 'postgres', database_url: POOLER_URL });
+      const cfg = loadConfig()!;
+      expect(cfg.direct_database_url).toBeUndefined();
+      expect(toEngineConfig(cfg).direct_database_url).toBeUndefined();
+    });
   });
 });
 

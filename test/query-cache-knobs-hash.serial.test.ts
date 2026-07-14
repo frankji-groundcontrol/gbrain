@@ -21,6 +21,7 @@ import type { SearchResult } from '../src/core/types.ts';
 import { knobsHash, resolveSearchMode } from '../src/core/search/mode.ts';
 import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
 
+// This fixture asserts 1536-dimension vectors, unlike the shared 1280d snapshot.
 let engine: PGLiteEngine;
 
 const conservativeHash = knobsHash(resolveSearchMode({ mode: 'conservative' }));

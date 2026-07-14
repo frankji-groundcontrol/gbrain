@@ -8,7 +8,7 @@
 import { listRecipes, getRecipe } from '../core/ai/recipes/index.ts';
 import { configureGateway, embedOne, isAvailable as gwIsAvailable, chat as gwChat } from '../core/ai/gateway.ts';
 import { probeOllama, probeLMStudio } from '../core/ai/probes.ts';
-import { loadConfig } from '../core/config.ts';
+import { loadConfig, type GBrainConfig } from '../core/config.ts';
 import { AIConfigError, AITransientError } from '../core/ai/errors.ts';
 import type { Recipe } from '../core/ai/types.ts';
 
@@ -42,6 +42,21 @@ function configureFromEnv(): void {
     base_urls: config?.provider_base_urls,
     env: { ...process.env },
   });
+}
+
+export function buildProbeGatewayConfig(
+  config: Pick<GBrainConfig, 'provider_base_urls'> | null | undefined,
+  touchpoint: 'embedding' | 'chat',
+  model: string,
+  embeddingDimensions?: number,
+) {
+  return {
+    base_urls: config?.provider_base_urls,
+    env: { ...process.env },
+    ...(touchpoint === 'embedding'
+      ? { embedding_model: model, embedding_dimensions: embeddingDimensions }
+      : { chat_model: model }),
+  };
 }
 
 export function envReady(recipe: Recipe, env: NodeJS.ProcessEnv = process.env): boolean {
@@ -163,8 +178,9 @@ async function runTest(args: string[]): Promise<void> {
     // the divergence at the top of the test so the recovery experience
     // doesn't repeat the bug-reporter's "providers test ✓ but import still
     // broken" trap.
+    let cfg: GBrainConfig | null = null;
     try {
-      const cfg = loadConfig();
+      cfg = loadConfig();
       const configuredModel = tpArg === 'embedding' ? cfg?.embedding_model : cfg?.chat_model;
       if (!configuredModel) {
         console.error(
@@ -182,16 +198,9 @@ async function runTest(args: string[]): Promise<void> {
 
     if (tpArg === 'embedding') {
       const dims = recipe?.touchpoints.embedding?.default_dims ?? 1536;
-      configureGateway({
-        embedding_model: modelArg,
-        embedding_dimensions: dims,
-        env: { ...process.env },
-      });
+      configureGateway(buildProbeGatewayConfig(cfg, 'embedding', modelArg, dims));
     } else {
-      configureGateway({
-        chat_model: modelArg,
-        env: { ...process.env },
-      });
+      configureGateway(buildProbeGatewayConfig(cfg, 'chat', modelArg));
     }
     void modelId; // intentionally unused but preserved for readability
   }

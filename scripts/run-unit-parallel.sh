@@ -14,7 +14,8 @@
 # Env overrides:
 #   SHARDS=N                     same as --shards
 #   GBRAIN_TEST_SHARD_TIMEOUT    per-shard wallclock cap, seconds (default 600)
-#   GBRAIN_TEST_MAX_CONCURRENCY  passed through to bun test (default 4)
+#   GBRAIN_TEST_MAX_CONCURRENCY  passed through to bun test (default 1)
+#   GBRAIN_TEST_FILES_PER_PROCESS local files per Bun process (default 8)
 #
 # Output files (workspace-local; falls back to /tmp if .context/ unwritable):
 #   .context/test-failures.log   failure blocks (cleared at start)
@@ -24,18 +25,6 @@
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
-
-# ──────────────────────────────────────────────────────────────────────────
-# CPU detection: Apple Silicon perf cores → Mac total physical → nproc → 4.
-# Returns a single positive integer.
-# ──────────────────────────────────────────────────────────────────────────
-detect_cpus() {
-  local n=""
-  n=$(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null) && [ -n "$n" ] && [ "$n" -gt 0 ] && echo "$n" && return
-  n=$(sysctl -n hw.physicalcpu 2>/dev/null) && [ -n "$n" ] && [ "$n" -gt 0 ] && echo "$n" && return
-  n=$(nproc 2>/dev/null) && [ -n "$n" ] && [ "$n" -gt 0 ] && echo "$n" && return
-  echo 4
-}
 
 # ──────────────────────────────────────────────────────────────────────────
 # Argument parsing. --shards N override wins over $SHARDS; both are clamped.
@@ -54,23 +43,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-N="${SHARDS_OVERRIDE:-${SHARDS:-$(detect_cpus)}}"
+N="${SHARDS_OVERRIDE:-${SHARDS:-1}}"
 if ! printf '%s' "$N" | grep -qE '^[0-9]+$' || [ "$N" -lt 1 ]; then
   echo "ERROR: invalid shard count: $N" >&2; exit 2
 fi
-# v0.40.10 flake-hardening: clamp default to 4 (was 8) to match CI's
-# test-shard.sh fan-out. At 8-shard parallel on Apple Silicon we observed
-# shard 5 SIGKILL during source-health.test.ts's PGLite migration replay —
-# 8 parallel PGLite WASM inits contend severely on the lockfile, and the
-# 92-migration replay × 8 simultaneous can wedge past even 900s. CI uses
-# 4 and is stable. Trade ~2x wallclock for reliability + parity with CI's
-# fan-out. Override via --shards N or SHARDS=N (still capped at 8).
+# Explicit high-concurrency overrides stay bounded to eight shards.
 [ "$N" -gt 8 ] && N=8
-if [ -z "${SHARDS_OVERRIDE:-}" ] && [ -z "${SHARDS:-}" ] && [ "$N" -gt 4 ]; then
-  N=4
-fi
 
-INTRA_CONC="${MAX_CONCURRENCY_OVERRIDE:-${GBRAIN_TEST_MAX_CONCURRENCY:-4}}"
+INTRA_CONC="${MAX_CONCURRENCY_OVERRIDE:-${GBRAIN_TEST_MAX_CONCURRENCY:-1}}"
 # v0.40.10 flake-hardening: bump per-shard cap 600 → 1500 (was 900). At
 # 4-shard default each shard runs 159 files / ~2420 tests with internal
 # wallclock 960-1020s. The 900s value (sized for 8-shard's ~80 files /
@@ -120,6 +100,18 @@ if [ "$DRY_RUN" = "1" ]; then
   exit 0
 fi
 
+# A post-migration PGLite dump replaces hundreds of per-file schema replays.
+# The fixture is gitignored, so build it only in a real checkout; the tiny
+# copied runner fixture used by its regression test intentionally lacks this
+# script and keeps its existing behavior.
+if [ -f scripts/build-pglite-snapshot.ts ]; then
+  if ! bun run build:pglite-snapshot; then
+    echo "[unit-parallel] snapshot build failed; refusing cold PGLite test run" >&2
+    exit 1
+  fi
+  export GBRAIN_PGLITE_SNAPSHOT=test/fixtures/pglite-snapshot.tar
+fi
+
 # ──────────────────────────────────────────────────────────────────────────
 # Spawn shards. Each child captures its own exit code into a sentinel file
 # so $? is recoverable per-shard (we never trust `wait`'s aggregate value).
@@ -130,11 +122,11 @@ for i in $(seq 1 "$N"); do
     SHARD_LOG="$LOG_DIR/shard-$i.log"
     if [ -n "$TIMEOUT_BIN" ]; then
       "$TIMEOUT_BIN" "${SHARD_TIMEOUT}s" \
-        env SHARD="$i/$N" \
+        env GBRAIN_SKIP_COLD_PGLITE_TESTS=1 GBRAIN_TEST_FILES_PER_PROCESS="${GBRAIN_TEST_FILES_PER_PROCESS:-8}" SHARD="$i/$N" \
         bash scripts/run-unit-shard.sh --max-concurrency="$INTRA_CONC" \
         > "$SHARD_LOG" 2>&1
     else
-      env SHARD="$i/$N" \
+      env GBRAIN_SKIP_COLD_PGLITE_TESTS=1 GBRAIN_TEST_FILES_PER_PROCESS="${GBRAIN_TEST_FILES_PER_PROCESS:-8}" SHARD="$i/$N" \
         bash scripts/run-unit-shard.sh --max-concurrency="$INTRA_CONC" \
         > "$SHARD_LOG" 2>&1 &
       pid=$!

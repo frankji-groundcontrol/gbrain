@@ -53,6 +53,7 @@ const ALL_TABLES = [
   // join), but stale rows poison stats/count assertions across runs.
   'context_volunteer_events',
   'pages',       // last because of foreign keys
+  'sources',     // reset resolver state; initSchema re-seeds only `default`
   'config',
   'minion_attachments',
   'minion_inbox',

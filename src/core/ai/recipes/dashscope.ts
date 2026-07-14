@@ -49,6 +49,24 @@ export const dashscope: Recipe = {
       // closer to Voyage density than OpenAI tiktoken for CJK-dominant
       // content. Conservative chars_per_token=2 leaves headroom.
       chars_per_token: 2,
+      // DashScope Vision Plus is native-API-only. Keep it out of `models`
+      // (the normal text /embeddings path) and allow it only through
+      // gateway.embedMultimodal().
+      supports_multimodal: true,
+      multimodal_models: ['tongyi-embedding-vision-plus-2026-03-06'],
+    },
+    reranker: {
+      // qwen3-vl-rerank is native-API-only. gateway.rerank() derives the
+      // sibling rerank service from the configured Workspace embedding URL;
+      // it must never be sent to the OpenAI-compatible embedding surface.
+      models: ['qwen3-vl-rerank'],
+      default_model: 'qwen3-vl-rerank',
+      // GBrain guard, not an Alibaba advertised raw-byte limit. It covers a
+      // 10 MiB query image plus four 1 MiB candidates after base64 expansion.
+      max_payload_bytes: 20 * 1024 * 1024,
+      // A cross-region Workspace request can exceed the generic hot-path 5s.
+      // The caller/config may still choose a tighter or looser timeout.
+      default_timeout_ms: 20_000,
     },
   },
   setup_hint:

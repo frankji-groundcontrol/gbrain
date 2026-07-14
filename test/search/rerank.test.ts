@@ -105,6 +105,41 @@ describe('applyReranker — happy path', () => {
     const out = await applyReranker('q', results, opts);
     expect((out[0] as any).rerank_score).toBe(0.42);
   });
+
+  test('uses a supplied mixed-content resolver without changing tail behavior', async () => {
+    const results = [
+      makeResult('image-page', 1, 'OCR fallback'),
+      makeResult('text-page', 0.9, 'plain text'),
+      makeResult('tail', 0.8, 'tail text'),
+    ];
+    let captured: any;
+    const opts: RerankerOpts = {
+      enabled: true,
+      topNIn: 2,
+      topNOut: null,
+      rerankerFn: async (input) => {
+        captured = input;
+        return [{ index: 1, relevanceScore: 1 }, { index: 0, relevanceScore: 0.5 }];
+      },
+    };
+
+    const out = await applyReranker(
+      { kind: 'image_base64', data: 'query-image', mime: 'image/png' } as any,
+      results,
+      opts,
+      async () => [
+        { kind: 'image_base64', data: 'candidate-image', mime: 'image/png' },
+        { kind: 'text', text: 'plain text' },
+      ] as any,
+    );
+
+    expect(captured.query).toEqual({ kind: 'image_base64', data: 'query-image', mime: 'image/png' });
+    expect(captured.documents).toEqual([
+      { kind: 'image_base64', data: 'candidate-image', mime: 'image/png' },
+      { kind: 'text', text: 'plain text' },
+    ]);
+    expect(out.map(r => r.slug)).toEqual(['text-page', 'image-page', 'tail']);
+  });
 });
 
 describe('applyReranker — CDX2-F16 null vs undefined semantics', () => {

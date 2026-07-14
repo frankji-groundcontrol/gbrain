@@ -29,6 +29,14 @@ import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { configureGateway, resetGateway, __setEmbedTransportForTests } from '../src/core/ai/gateway.ts';
 import { withEnv } from './helpers/with-env.ts';
 
+// These lanes assert a 1536d schema and a ZE/1280 mismatch without real keys.
+delete process.env.GBRAIN_PGLITE_SNAPSHOT;
+const TEST_GATEWAY_ENV = {
+  ...process.env,
+  OPENAI_API_KEY: 'sk-fake',
+  ZEROENTROPY_API_KEY: 'ze-fake',
+};
+
 // ─────────────────────────────────────────────────────────────────────
 // Lane A.7 — Chunk-row INSERT model default tracks defaults.ts constant
 // (not stale OpenAI literal). Pre-fix `chunk.model || 'text-embedding-3-large'`
@@ -73,7 +81,7 @@ describe('Lane A.8 — schema seed stores full provider:model in DB config', () 
     configureGateway({
       embedding_model: 'zeroentropyai:zembed-1',
       embedding_dimensions: 1280,
-      env: { ...process.env },
+      env: TEST_GATEWAY_ENV,
     });
     const engine = new PGLiteEngine();
     await engine.connect({});
@@ -88,7 +96,7 @@ describe('Lane A.8 — schema seed stores full provider:model in DB config', () 
       configureGateway({
         embedding_model: 'openai:text-embedding-3-large',
         embedding_dimensions: 1536,
-        env: { ...process.env },
+        env: TEST_GATEWAY_ENV,
       });
     }
   });
@@ -139,7 +147,7 @@ describe('Lane B — init precedence chain (CLI > env > existing file > default)
         cg1({
           embedding_model: process.env.GBRAIN_EMBEDDING_MODEL ?? 'voyage:voyage-3-large',
           embedding_dimensions: parseInt(process.env.GBRAIN_EMBEDDING_DIMENSIONS!, 10),
-          env: { ...process.env },
+          env: TEST_GATEWAY_ENV,
         });
         expect(gm1()).toBe('openai:text-embedding-3-small');
         expect(gd1()).toBe(768);
@@ -149,7 +157,7 @@ describe('Lane B — init precedence chain (CLI > env > existing file > default)
         cg1({
           embedding_model: 'voyage:voyage-2', // simulated CLI flag
           embedding_dimensions: 1024,
-          env: { ...process.env },
+          env: TEST_GATEWAY_ENV,
         });
         expect(gm1()).toBe('voyage:voyage-2');
         expect(gd1()).toBe(1024);
@@ -160,7 +168,7 @@ describe('Lane B — init precedence chain (CLI > env > existing file > default)
     configureGateway({
       embedding_model: 'openai:text-embedding-3-large',
       embedding_dimensions: 1536,
-      env: { ...process.env },
+      env: TEST_GATEWAY_ENV,
     });
   });
 });
@@ -221,7 +229,7 @@ describe('Lane D.2 — embed pre-flight catches dim mismatch before worker pool'
     configureGateway({
       embedding_model: 'openai:text-embedding-3-large',
       embedding_dimensions: 1536,
-      env: { ...process.env },
+      env: TEST_GATEWAY_ENV,
     });
     engine = new PGLiteEngine();
     await engine.connect({});
@@ -238,7 +246,7 @@ describe('Lane D.2 — embed pre-flight catches dim mismatch before worker pool'
     configureGateway({
       embedding_model: 'openai:text-embedding-3-large',
       embedding_dimensions: 1536,
-      env: { ...process.env },
+      env: TEST_GATEWAY_ENV,
     });
   });
 
@@ -249,7 +257,7 @@ describe('Lane D.2 — embed pre-flight catches dim mismatch before worker pool'
     configureGateway({
       embedding_model: 'zeroentropyai:zembed-1',
       embedding_dimensions: 1280,
-      env: { ...process.env },
+      env: TEST_GATEWAY_ENV,
     });
 
     let transportCalled = false;
@@ -277,7 +285,7 @@ describe('Lane D.2 — embed pre-flight catches dim mismatch before worker pool'
     configureGateway({
       embedding_model: 'openai:text-embedding-3-large',
       embedding_dimensions: 1536,
-      env: { ...process.env },
+      env: TEST_GATEWAY_ENV,
     });
   });
 
@@ -285,7 +293,7 @@ describe('Lane D.2 — embed pre-flight catches dim mismatch before worker pool'
     configureGateway({
       embedding_model: 'zeroentropyai:zembed-1',
       embedding_dimensions: 1280,
-      env: { ...process.env },
+      env: TEST_GATEWAY_ENV,
     });
     const { runEmbedCore } = await import('../src/commands/embed.ts');
     const result = await runEmbedCore(engine, { all: true, dryRun: true });
@@ -293,7 +301,7 @@ describe('Lane D.2 — embed pre-flight catches dim mismatch before worker pool'
     configureGateway({
       embedding_model: 'openai:text-embedding-3-large',
       embedding_dimensions: 1536,
-      env: { ...process.env },
+      env: TEST_GATEWAY_ENV,
     });
   });
 });
@@ -359,7 +367,7 @@ describe('reinit-pglite — backup + reinit', () => {
     configureGateway({
       embedding_model: 'openai:text-embedding-3-large',
       embedding_dimensions: 1536,
-      env: { ...process.env },
+      env: TEST_GATEWAY_ENV,
     });
   });
 

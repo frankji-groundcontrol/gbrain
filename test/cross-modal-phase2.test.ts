@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import {
   ImageLoadError,
   loadImageInput,
+  loadSourceImageCandidate,
 } from '../src/core/search/image-loader.ts';
 import { __setDnsLookupForTests } from '../src/core/ssrf-validate.ts';
 
@@ -102,6 +103,38 @@ describe('loadImageInput — local path', () => {
     const err = await loadImageInput(join(tmpRoot, 'missing.png')).catch(e => e);
     expect(err).toBeInstanceOf(ImageLoadError);
     expect(err.code).toBe('NOT_FOUND');
+  });
+});
+
+describe('loadSourceImageCandidate — source-root confinement', () => {
+  test('loads a stored relative image only when its real path remains inside the source root', async () => {
+    const assets = join(tmpRoot, 'assets');
+    mkdirSync(assets);
+    writeFileSync(join(assets, 'inside.png'), PNG_BYTES);
+
+    const loaded = await loadSourceImageCandidate(tmpRoot, 'assets/inside.png', { maxBytes: 1024 });
+
+    expect(loaded?.contentType).toBe('image/png');
+  });
+
+  test('fails closed for traversal and symlink escapes', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'gbrain-img-outside-'));
+    writeFileSync(join(outside, 'outside.png'), PNG_BYTES);
+    const assets = join(tmpRoot, 'assets');
+    mkdirSync(assets);
+    const { symlinkSync } = await import('node:fs');
+    symlinkSync(join(outside, 'outside.png'), join(assets, 'escape.png'));
+
+    expect(await loadSourceImageCandidate(tmpRoot, '../outside.png')).toBeNull();
+    expect(await loadSourceImageCandidate(tmpRoot, 'assets/escape.png')).toBeNull();
+  });
+
+  test('falls back cleanly when a candidate exceeds its dedicated rerank cap', async () => {
+    const assets = join(tmpRoot, 'assets');
+    mkdirSync(assets);
+    writeFileSync(join(assets, 'large.png'), Buffer.concat([PNG_BYTES, Buffer.alloc(1024)]));
+
+    expect(await loadSourceImageCandidate(tmpRoot, 'assets/large.png', { maxBytes: 100 })).toBeNull();
   });
 });
 

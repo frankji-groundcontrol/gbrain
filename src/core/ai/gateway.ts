@@ -1172,6 +1172,197 @@ const zeroEntropyCompatFetch = (async (input: RequestInfo | URL, init?: RequestI
   }
 }) as unknown as typeof fetch;
 
+/** DashScope workspace embeddings use a native, non-OpenAI-shaped endpoint. */
+const dashscopeWorkspaceCompatFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  let url: string;
+  let requestInit: RequestInit;
+  if (typeof input === 'string') {
+    url = input;
+    requestInit = init ?? {};
+  } else if (input instanceof URL) {
+    url = input.toString();
+    requestInit = init ?? {};
+  } else {
+    url = input.url;
+    const body = init?.body ?? (input.body ? await input.clone().text() : undefined);
+    requestInit = { method: input.method, headers: input.headers, ...init, ...(body ? { body } : {}) };
+  }
+
+  try {
+    const parsed = requestInit.body && typeof requestInit.body === 'string'
+      ? JSON.parse(requestInit.body)
+      : null;
+    if (parsed && Array.isArray(parsed.input)) {
+      const headers = new Headers(requestInit.headers ?? {});
+      headers.delete('content-length');
+      requestInit = {
+        ...requestInit,
+        headers,
+        body: JSON.stringify({ model: parsed.model, input: { texts: parsed.input } }),
+      };
+    }
+    const u = new URL(url);
+    if (u.pathname.endsWith('/embeddings')) {
+      u.pathname = u.pathname.slice(0, -'/embeddings'.length);
+      url = u.toString();
+    }
+  } catch { /* pass malformed inputs through to fetch */ }
+
+  const response = await fetch(url, requestInit);
+  if (!response.ok || !response.headers.get('content-type')?.toLowerCase().includes('application/json')) return response;
+  try {
+    const json: any = await response.clone().json();
+    const embeddings = json?.output?.embeddings;
+    if (!Array.isArray(embeddings)) return response;
+    return new Response(JSON.stringify({
+      data: embeddings.map((row: any, index: number) => ({
+        object: 'embedding', embedding: row?.embedding ?? [], index: row?.text_index ?? index,
+      })),
+      usage: {
+        total_tokens: json?.usage?.total_tokens ?? 0,
+        prompt_tokens: json?.usage?.total_tokens ?? 0,
+      },
+    }), { status: response.status, statusText: response.statusText, headers: response.headers });
+  } catch {
+    return response;
+  }
+}) as unknown as typeof fetch;
+
+const DASHSCOPE_NATIVE_TEXT_ENDPOINT = '/api/v1/services/embeddings/text-embedding/text-embedding';
+const DASHSCOPE_NATIVE_MULTIMODAL_ENDPOINT = '/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding';
+const DASHSCOPE_NATIVE_RERANK_ENDPOINT = '/api/v1/services/rerank/text-rerank/text-rerank';
+const DASHSCOPE_MULTIMODAL_BATCH_SIZE = 20;
+const DASHSCOPE_MULTIMODAL_DIMENSIONS = 1024;
+
+function resolveDashscopeNativeSiblingUrl(baseUrl: string, endpoint: string, capability: string): string {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    throw new AIConfigError(
+      `DashScope ${capability} requires an absolute base URL; received ${JSON.stringify(baseUrl)}.`,
+      'Set provider_base_urls.dashscope to your DashScope workspace compatible-mode or native text-embedding endpoint.',
+    );
+  }
+  if (url.pathname.endsWith(DASHSCOPE_NATIVE_TEXT_ENDPOINT)) {
+    url.pathname = url.pathname.slice(0, -DASHSCOPE_NATIVE_TEXT_ENDPOINT.length) + endpoint;
+  } else if (url.pathname.replace(/\/+$/, '') === '/compatible-mode/v1') {
+    url.pathname = endpoint;
+  } else {
+    throw new AIConfigError(
+      `DashScope ${capability} cannot derive its native endpoint from ${url.pathname}.`,
+      'Use a DashScope /compatible-mode/v1 base URL or the workspace native text-embedding endpoint.',
+    );
+  }
+  url.search = '';
+  return url.toString();
+}
+
+function resolveDashscopeMultimodalUrl(baseUrl: string): string {
+  return resolveDashscopeNativeSiblingUrl(baseUrl, DASHSCOPE_NATIVE_MULTIMODAL_ENDPOINT, 'multimodal');
+}
+
+function resolveDashscopeRerankUrl(baseUrl: string): string {
+  return resolveDashscopeNativeSiblingUrl(baseUrl, DASHSCOPE_NATIVE_RERANK_ENDPOINT, 'rerank');
+}
+
+type DashscopeMultimodalEmbedArgs = {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  inputs: MultimodalInput[];
+};
+
+async function dashscopeWorkspaceMultimodalEmbed({
+  baseUrl,
+  apiKey,
+  model,
+  inputs,
+}: DashscopeMultimodalEmbedArgs): Promise<Float32Array[]> {
+  const endpoint = resolveDashscopeMultimodalUrl(baseUrl);
+  const allEmbeddings: Float32Array[] = [];
+
+  for (let offset = 0; offset < inputs.length; offset += DASHSCOPE_MULTIMODAL_BATCH_SIZE) {
+    const batch = inputs.slice(offset, offset + DASHSCOPE_MULTIMODAL_BATCH_SIZE);
+    const body = {
+      model,
+      input: {
+        contents: batch.map(input => input.kind === 'text'
+          ? { text: input.text }
+          : { image: `data:${input.mime};base64,${input.data}` }),
+      },
+      parameters: { dimension: DASHSCOPE_MULTIMODAL_DIMENSIONS },
+    };
+
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(AI_MULTIMODAL_TIMEOUT_MS),
+      });
+    } catch (err) {
+      throw normalizeAIError(err, `embedMultimodal(dashscope:${model})`);
+    }
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      if (response.status === 401 || response.status === 403) {
+        throw new AIConfigError(
+          `DashScope multimodal returned ${response.status}: ${text || 'auth failed'}.`,
+          'Check DASHSCOPE_API_KEY and make sure the selected model is enabled in this workspace.',
+        );
+      }
+      throw new AITransientError(
+        `DashScope multimodal returned ${response.status}: ${text || 'transient error'}.`,
+      );
+    }
+
+    let payload: { output?: { embeddings?: Array<{ index?: unknown; embedding?: unknown }> } };
+    try {
+      payload = await response.json() as { output?: { embeddings?: Array<{ index?: unknown; embedding?: unknown }> } };
+    } catch (err) {
+      throw new AITransientError(
+        `DashScope multimodal returned malformed JSON: ${err instanceof Error ? err.message : String(err)}.`,
+      );
+    }
+    const rows = payload.output?.embeddings;
+    if (!Array.isArray(rows) || rows.length !== batch.length) {
+      throw new AITransientError(
+        `DashScope multimodal returned unexpected payload shape (expected ${batch.length} embeddings).`,
+      );
+    }
+
+    const ordered = new Array<Float32Array>(batch.length);
+    for (const row of rows) {
+      const index = row.index;
+      if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= batch.length || ordered[index]) {
+        throw new AITransientError('DashScope multimodal returned duplicate or invalid embedding indexes.');
+      }
+      if (!Array.isArray(row.embedding) || row.embedding.length !== DASHSCOPE_MULTIMODAL_DIMENSIONS) {
+        throw new AIConfigError(
+          `DashScope ${model} returned ${Array.isArray(row.embedding) ? row.embedding.length : 0}-dim vector; expected ${DASHSCOPE_MULTIMODAL_DIMENSIONS}.`,
+          'GBrain multimodal columns are fixed at 1024 dimensions. Configure a 1024d DashScope multimodal model.',
+        );
+      }
+      ordered[index] = new Float32Array(row.embedding);
+    }
+    if (ordered.some(vector => vector === undefined)) {
+      throw new AITransientError('DashScope multimodal omitted an embedding index.');
+    }
+    allEmbeddings.push(...ordered);
+  }
+
+  return allEmbeddings;
+}
+
+/** @internal Test-only access to wire adapters. */
+export const __testing = { dashscopeWorkspaceCompatFetch, dashscopeWorkspaceMultimodalEmbed };
+
 /**
  * Generic asymmetric-embedding shim for openai-compatible recipes that
  * ship no compat fetch of their own (llama-server, litellm, ollama, ...).
@@ -1225,6 +1416,12 @@ const openAICompatAsymmetricFetch = (async (input: RequestInfo | URL, init?: Req
 async function resolveEmbeddingProvider(modelStr: string): Promise<{ model: any; recipe: Recipe; modelId: string }> {
   const { parsed, recipe } = resolveRecipe(modelStr);
   assertTouchpoint(recipe, 'embedding', parsed.modelId, getExtendedModelsForProvider(parsed.providerId));
+  if (recipe.touchpoints.embedding?.multimodal_models?.includes(parsed.modelId)) {
+    throw new AIConfigError(
+      `${recipe.id}:${parsed.modelId} is multimodal-only and cannot be used as embedding_model.`,
+      `Set embedding_multimodal_model to ${recipe.id}:${parsed.modelId} and keep a text embedding_model configured.`,
+    );
+  }
   const cfg = requireConfig();
 
   const cacheKey = `emb:${recipe.id}:${parsed.modelId}:${cfg.base_urls?.[recipe.id] ?? ''}`;
@@ -1288,6 +1485,8 @@ function instantiateEmbedding(recipe: Recipe, modelId: string, cfg: AIGatewayCon
           ? voyageCompatFetch
           : recipe.id === 'zeroentropyai'
           ? zeroEntropyCompatFetch
+          : recipe.id === 'dashscope' && compat.baseURL.includes('/api/v1/services/embeddings/text-embedding/text-embedding')
+          ? dashscopeWorkspaceCompatFetch
           : openAICompatAsymmetricFetch);
       const client = createOpenAICompatible({
         name: recipe.id,
@@ -1763,6 +1962,27 @@ export async function embedMultimodal(
       `${recipe.id}:${parsed.modelId} is not a multimodal-capable model.`,
       `Use one of: ${touchpoint.multimodal_models.map(m => `${recipe.id}:${m}`).join(', ')}.`,
     );
+  }
+
+  // DashScope's Vision Plus endpoint is native-only even though the recipe's
+  // text models use the OpenAI-compatible surface. It must win before the
+  // generic openai-compatible branch below.
+  if (recipe.id === 'dashscope') {
+    const apiKey = cfg.env[recipe.auth_env?.required[0] ?? 'DASHSCOPE_API_KEY'];
+    if (!apiKey) {
+      throw new AIConfigError(
+        `${recipe.name} requires ${recipe.auth_env?.required[0] ?? 'DASHSCOPE_API_KEY'} for multimodal embedding.`,
+        recipe.setup_hint,
+      );
+    }
+    const baseUrl = cfg.base_urls?.[recipe.id] ?? recipe.base_url_default;
+    if (!baseUrl) {
+      throw new AIConfigError(
+        `${recipe.name} requires a base URL for multimodal embedding.`,
+        recipe.setup_hint,
+      );
+    }
+    return dashscopeWorkspaceMultimodalEmbed({ baseUrl, apiKey, model: parsed.modelId, inputs });
   }
 
   // v0.34.1 (#875): route by recipe.implementation so openai-compat
@@ -3228,9 +3448,15 @@ export class RerankError extends Error {
   }
 }
 
+export type RerankContent =
+  | { kind: 'text'; text: string }
+  | { kind: 'image_base64'; data: string; mime: string };
+
+type RerankValue = string | RerankContent;
+
 export interface RerankInput {
-  query: string;
-  documents: string[];
+  query: RerankValue;
+  documents: RerankValue[];
   topN?: number;
   /** Override the gateway-configured reranker model for this single call. */
   model?: string;
@@ -3260,6 +3486,98 @@ export function __setRerankTransportForTests(fn: RerankTransport | null): void {
 
 const DEFAULT_RERANK_TIMEOUT_MS = 5000;
 
+function rerankValueChars(value: RerankValue): number {
+  if (typeof value === 'string') return value.length;
+  return value.kind === 'text' ? value.text.length : value.data.length;
+}
+
+function isEmptyRerankValue(value: RerankValue): boolean {
+  return typeof value === 'string'
+    ? value.length === 0
+    : value.kind === 'text'
+    ? value.text.length === 0
+    : value.data.length === 0 || value.mime.length === 0;
+}
+
+function dashscopeRerankValue(value: RerankValue): { text: string } | { image: string } {
+  if (typeof value === 'string') return { text: value };
+  if (value.kind === 'text') return { text: value.text };
+  return { image: `data:${value.mime};base64,${value.data}` };
+}
+
+function isDashscopeVlReranker(recipeId: string, modelId: string): boolean {
+  return recipeId === 'dashscope' && modelId === 'qwen3-vl-rerank';
+}
+
+function ensureTextOnlyRerankInput(input: RerankInput): asserts input is {
+  query: string;
+  documents: string[];
+  topN?: number;
+  model?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+} {
+  if (typeof input.query !== 'string' || input.documents.some(doc => typeof doc !== 'string')) {
+    throw new RerankError(
+      'This reranker accepts text query and documents only.',
+      'unknown',
+    );
+  }
+}
+
+async function postRerankJson(
+  url: string,
+  headers: Headers,
+  body: string,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<any> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(new Error('rerank timed out')), timeoutMs);
+  if (signal) {
+    if (signal.aborted) ctrl.abort(signal.reason);
+    else signal.addEventListener('abort', () => ctrl.abort(signal.reason), { once: true });
+  }
+  try {
+    const transport: RerankTransport = _rerankTransport ?? ((u, init) => fetch(u, init));
+    const resp = await transport(url, {
+      method: 'POST',
+      headers,
+      body,
+      signal: ctrl.signal,
+    });
+    if (!resp.ok) {
+      let msg = `rerank HTTP ${resp.status}`;
+      try {
+        const txt = await resp.text();
+        if (txt) msg = `${msg}: ${txt.slice(0, 500)}`;
+      } catch {
+        // Preserve the status-only response when the body cannot be read.
+      }
+      const reason: RerankError['reason'] =
+        resp.status === 401 || resp.status === 403
+          ? 'auth'
+          : resp.status === 429
+          ? 'rate_limit'
+          : resp.status >= 500
+          ? 'network'
+          : 'unknown';
+      throw new RerankError(msg, reason, resp.status);
+    }
+    return await resp.json();
+  } catch (err) {
+    if (err instanceof RerankError) throw err;
+    if (err && typeof err === 'object' && (err as any).name === 'AbortError') {
+      const msg = (err as Error).message || 'rerank aborted';
+      throw new RerankError(msg, msg.toLowerCase().includes('timed out') ? 'timeout' : 'unknown');
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new RerankError(`rerank: ${msg}`, 'network');
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 /**
  * Submit a query + N documents to the configured reranker. Returns a list of
  * `{index, relevanceScore}` sorted by relevanceScore descending (per upstream
@@ -3278,7 +3596,7 @@ const DEFAULT_RERANK_TIMEOUT_MS = 5000;
  * openai-compatible recipes — CDX2-F11 in the plan.
  */
 export async function rerank(input: RerankInput): Promise<RerankResult[]> {
-  if (!input.query) {
+  if (!input.query || isEmptyRerankValue(input.query)) {
     throw new RerankError('rerank: query is required', 'unknown');
   }
   if (!input.documents || input.documents.length === 0) {
@@ -3291,11 +3609,11 @@ export async function rerank(input: RerankInput): Promise<RerankResult[]> {
     DEFAULT_RERANKER_MODEL;
 
   const tracker = __budgetStore.getStore() ?? null;
+  const totalChars = rerankValueChars(input.query) + input.documents.reduce((sum, doc) => sum + rerankValueChars(doc), 0);
   if (tracker) {
     // Reranker pricing isn't in the canonical pricing map today — when no
     // cap is set this fires the warn-once path; when a cap IS set TX2 hard-
     // fails. record() below logs the actual size after success.
-    const totalChars = input.query.length + input.documents.reduce((s, d) => s + d.length, 0);
     tracker.reserve({
       modelId: modelStr,
       estimatedInputTokens: Math.ceil(totalChars / 4),
@@ -3320,6 +3638,23 @@ export async function rerank(input: RerankInput): Promise<RerankResult[]> {
     );
   }
 
+  let rerankRecorded = false;
+  const recordRerankUsage = (): void => {
+    if (!tracker || rerankRecorded) return;
+    rerankRecorded = true;
+    try {
+      tracker.record({
+        modelId: modelStr,
+        inputTokens: Math.ceil(totalChars / 4),
+        outputTokens: 0,
+        kind: 'rerank',
+        label: 'gateway.rerank',
+      });
+    } catch {
+      // BudgetExhausted (TX1) is surfaced by the next reservation.
+    }
+  };
+
   // Resolve base URL + auth from the recipe (same path Voyage/ZE embeddings use).
   const cfg = requireConfig();
   const compat = applyOpenAICompatConfig(recipe, cfg);
@@ -3340,6 +3675,70 @@ export async function rerank(input: RerankInput): Promise<RerankResult[]> {
     ...(auth.apiKey ? { Authorization: `Bearer ${auth.apiKey}` } : {}),
     ...(auth.headers ?? {}),
   };
+
+  const isDashscopeNative = isDashscopeVlReranker(recipe.id, parsed.modelId);
+  if (isDashscopeNative) {
+    const imageDocuments = input.documents.filter(doc =>
+      typeof doc !== 'string' && doc.kind === 'image_base64',
+    ).length;
+    if (input.documents.length > 100 || imageDocuments > 40) {
+      throw new RerankError(
+        `DashScope qwen3-vl-rerank accepts at most 100 documents and 40 image documents (got ${input.documents.length} documents, ${imageDocuments} images).`,
+        'payload_too_large',
+      );
+    }
+    const body = JSON.stringify({
+      model: parsed.modelId,
+      input: {
+        query: dashscopeRerankValue(input.query),
+        documents: input.documents.map(dashscopeRerankValue),
+      },
+      parameters: {
+        return_documents: false,
+        ...(input.topN !== undefined ? { top_n: input.topN } : {}),
+      },
+    });
+    const bodyBytes = Buffer.byteLength(body, 'utf8');
+    if (bodyBytes > tp.max_payload_bytes) {
+      throw new RerankError(
+        `Rerank payload ${bodyBytes} bytes exceeds ${tp.max_payload_bytes} byte cap for ${recipe.name}`,
+        'payload_too_large',
+      );
+    }
+    const headers = new Headers(authHeaders);
+    headers.set('Content-Type', 'application/json');
+    try {
+      const json = await postRerankJson(
+        resolveDashscopeRerankUrl(compat.baseURL),
+        headers,
+        body,
+        input.signal,
+        input.timeoutMs ?? tp.default_timeout_ms ?? DEFAULT_RERANK_TIMEOUT_MS,
+      );
+      const results = json?.output?.results;
+      if (!Array.isArray(results)) {
+        throw new RerankError('rerank: malformed DashScope response (no output.results array)', 'unknown');
+      }
+      const seen = new Set<number>();
+      const mapped = results.map((r: any) => {
+        if (!Number.isInteger(r?.index) || r.index < 0 || r.index >= input.documents.length || seen.has(r.index)) {
+          throw new RerankError('rerank: malformed DashScope response index', 'unknown');
+        }
+        seen.add(r.index);
+        if (typeof r.relevance_score !== 'number') {
+          throw new RerankError('rerank: malformed DashScope relevance score', 'unknown');
+        }
+        return { index: r.index, relevanceScore: r.relevance_score };
+      });
+      recordRerankUsage();
+      return mapped;
+    } catch (err) {
+      recordRerankUsage();
+      throw err;
+    }
+  }
+
+  ensureTextOnlyRerankInput(input);
   const body = JSON.stringify({
     model: parsed.modelId,
     query: input.query,
@@ -3362,60 +3761,8 @@ export async function rerank(input: RerankInput): Promise<RerankResult[]> {
   // Build headers from resolveAuth (default applies Bearer-style header).
   const headers = new Headers(authHeaders);
   headers.set('Content-Type', 'application/json');
-
-  // Timeout via AbortController; merges with caller-supplied signal.
-  const ctrl = new AbortController();
-  const timeoutMs = input.timeoutMs ?? DEFAULT_RERANK_TIMEOUT_MS;
-  const t = setTimeout(() => ctrl.abort(new Error('rerank timed out')), timeoutMs);
-  if (input.signal) {
-    if (input.signal.aborted) ctrl.abort(input.signal.reason);
-    else input.signal.addEventListener('abort', () => ctrl.abort(input.signal!.reason), { once: true });
-  }
-
-  let _rerankRecorded = false;
-  const _rerankRecord = (): void => {
-    if (!tracker || _rerankRecorded) return;
-    _rerankRecorded = true;
-    try {
-      const totalChars = input.query.length + input.documents.reduce((s, d) => s + d.length, 0);
-      tracker.record({
-        modelId: modelStr,
-        inputTokens: Math.ceil(totalChars / 4),
-        outputTokens: 0,
-        kind: 'rerank',
-        label: 'gateway.rerank',
-      });
-    } catch {
-      // BudgetExhausted (TX1) suppressed; surfaces on next reserve().
-    }
-  };
   try {
-    const transport: RerankTransport = _rerankTransport ?? ((u, init) => fetch(u, init));
-    const resp = await transport(url, {
-      method: 'POST',
-      headers,
-      body,
-      signal: ctrl.signal,
-    });
-    if (!resp.ok) {
-      let msg = `rerank HTTP ${resp.status}`;
-      try {
-        const txt = await resp.text();
-        if (txt) msg = `${msg}: ${txt.slice(0, 500)}`;
-      } catch {
-        // Body read failed — preserve status-only message.
-      }
-      const reason: RerankError['reason'] =
-        resp.status === 401 || resp.status === 403
-          ? 'auth'
-          : resp.status === 429
-          ? 'rate_limit'
-          : resp.status >= 500
-          ? 'network'
-          : 'unknown';
-      throw new RerankError(msg, reason, resp.status);
-    }
-    const json: any = await resp.json();
+    const json = await postRerankJson(url, headers, body, input.signal, input.timeoutMs ?? tp.default_timeout_ms ?? DEFAULT_RERANK_TIMEOUT_MS);
     if (!json || !Array.isArray(json.results)) {
       throw new RerankError('rerank: malformed response (no results array)', 'unknown');
     }
@@ -3423,21 +3770,11 @@ export async function rerank(input: RerankInput): Promise<RerankResult[]> {
       index: typeof r.index === 'number' ? r.index : 0,
       relevanceScore: typeof r.relevance_score === 'number' ? r.relevance_score : 0,
     }));
-    _rerankRecord();
+    recordRerankUsage();
     return mapped;
   } catch (err) {
-    _rerankRecord();
-    if (err instanceof RerankError) throw err;
-    // AbortError on timeout — classify cleanly.
-    if (err && typeof err === 'object' && (err as any).name === 'AbortError') {
-      const msg = (err as Error).message || 'rerank aborted';
-      throw new RerankError(msg, msg.toLowerCase().includes('timed out') ? 'timeout' : 'unknown');
-    }
-    // Network errors (DNS, connection refused, etc.) become network class.
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new RerankError(`rerank: ${msg}`, 'network');
-  } finally {
-    clearTimeout(t);
+    recordRerankUsage();
+    throw err;
   }
 }
 

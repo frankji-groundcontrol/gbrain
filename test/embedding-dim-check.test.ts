@@ -20,6 +20,7 @@ import {
   PGVECTOR_COLUMN_MAX_DIMS,
 } from '../src/core/embedding-dim-check.ts';
 import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
+import { withEnv } from './helpers/with-env.ts';
 
 // Canonical pattern: single engine per file, init once, disconnect once.
 // The two tests below diverge in whether they want a migrated brain or a
@@ -71,17 +72,19 @@ describe('readContentChunksEmbeddingDim', () => {
   }, 30000);
 
   test('returns { exists: false, dims: null } on a fresh brain (no initSchema)', async () => {
-    // One-off engine for the fresh-brain case. Never call initSchema so
-    // content_chunks doesn't exist yet. Cleaned up at end of test.
-    const fresh = new PGLiteEngine();
-    await fresh.connect({});
-    try {
-      const result = await readContentChunksEmbeddingDim(fresh);
-      expect(result.exists).toBe(false);
-      expect(result.dims).toBeNull();
-    } finally {
-      await fresh.disconnect();
-    }
+    await withEnv({ GBRAIN_PGLITE_SNAPSHOT: undefined }, async () => {
+      // One-off engine for the fresh-brain case. Never call initSchema so
+      // content_chunks doesn't exist yet. Cleaned up at end of test.
+      const fresh = new PGLiteEngine();
+      await fresh.connect({});
+      try {
+        const result = await readContentChunksEmbeddingDim(fresh);
+        expect(result.exists).toBe(false);
+        expect(result.dims).toBeNull();
+      } finally {
+        await fresh.disconnect();
+      }
+    });
   }, 30000);
 });
 
@@ -369,6 +372,13 @@ describe('resolveSchemaMultimodalDim', () => {
       expect(got.provider).toBe('voyage');
       expect(got.dim).toBeGreaterThan(0);
     }
+  });
+
+  test('DashScope Vision Plus accepted at the committed 1024d multimodal width', () => {
+    const got = resolveSchemaMultimodalDim({
+      embedding_multimodal_model: 'dashscope:tongyi-embedding-vision-plus-2026-03-06',
+    });
+    expect(got).toMatchObject({ ok: true, provider: 'dashscope', dim: 1024 });
   });
 
   test('OpenAI text-embedding-3-large rejected — not multimodal', () => {

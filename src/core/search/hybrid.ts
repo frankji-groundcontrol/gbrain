@@ -26,7 +26,7 @@ import { applyAutocut, type AutocutDecision } from './autocut.ts';
 import { buildRelationalArm } from './relational-recall.ts';
 import { loadConfigWithEngine } from '../config.ts';
 import { dedupResults } from './dedup.ts';
-import { applyReranker } from './rerank.ts';
+import { applyReranker, isDashscopeVlReranker, makeImageCandidateResolver } from './rerank.ts';
 import { autoDetectDetail, classifyQuery, isAmbiguousModalityQuery } from './query-intent.ts';
 import { isTitlePhraseMatch } from './title-match.ts';
 import { normalizeAlias } from './alias-normalize.ts';
@@ -1471,7 +1471,12 @@ export async function hybridSearch(
     timeoutMs: resolvedMode.reranker_timeout_ms,
   };
   const reranked = rerankerOpts.enabled
-    ? await applyReranker(query, deduped, rerankerOpts as any)
+    ? await applyReranker(
+      query,
+      deduped,
+      rerankerOpts as any,
+      isDashscopeVlReranker(rerankerOpts.model) ? makeImageCandidateResolver(engine) : undefined,
+    )
     : deduped;
 
   // T3 — free-text alias hop. Runs AFTER rerank so a query that is a page's

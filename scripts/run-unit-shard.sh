@@ -9,8 +9,8 @@
 # the runner container, each pinned to its own postgres shard for the
 # downstream E2E phase.
 #
-# Sequential bun processes within a shard (one bun test invocation with the
-# shard's file list); parallel across shards (4 of these run concurrently).
+# Docker CI batches a shard in one Bun process. The local wrapper uses small
+# batches so PGLite/WASM memory is released before it accumulates.
 
 set -euo pipefail
 
@@ -28,6 +28,25 @@ while [ $# -gt 0 ]; do
     *) echo "ERROR: unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+
+FILES_PER_PROCESS="${GBRAIN_TEST_FILES_PER_PROCESS:-}"
+if [ -n "$FILES_PER_PROCESS" ] && \
+   { ! printf '%s' "$FILES_PER_PROCESS" | grep -qE '^[1-9][0-9]*$'; }; then
+  echo "ERROR: GBRAIN_TEST_FILES_PER_PROCESS must be a positive integer" >&2
+  exit 2
+fi
+
+# These suites intentionally construct empty PGLite databases. The local
+# wrapper excludes them to keep the edit loop resource-safe; direct shard
+# callers (including Docker CI) retain full coverage.
+cold_bootstrap_files=("test/bootstrap.test.ts"
+  "test/destructive-guard.test.ts"
+  "test/pages-soft-delete.test.ts"
+  "test/schema-bootstrap-coverage.test.ts")
+
+# The snapshot matches Bun's legacy 1536d test preload. Only bootstrap suites
+# need a whole-file empty database rather than a post-migration restore.
+snapshot_opt_out=("${cold_bootstrap_files[@]}")
 
 # All non-E2E test files, sorted for deterministic shard splits.
 # Tier 4: *.slow.test.ts is "always-slow" (cold-path correctness checks);
@@ -61,6 +80,18 @@ else
   files=("${all_files[@]}")
 fi
 
+if [ "${GBRAIN_SKIP_COLD_PGLITE_TESTS:-}" = "1" ]; then
+  selected=()
+  for f in "${files[@]}"; do
+    cold=0
+    for opt_out in "${cold_bootstrap_files[@]}"; do
+      [ "$f" = "$opt_out" ] && cold=1 && break
+    done
+    [ "$cold" = "0" ] && selected+=("$f")
+  done
+  files=("${selected[@]}")
+fi
+
 if [ "${#files[@]}" -eq 0 ]; then
   echo "[unit-shard ${SHARD:-(unsharded)}] no files; exiting clean."
   exit 0
@@ -72,7 +103,73 @@ if [ "$DRY_RUN" = "1" ]; then
 fi
 
 echo "[unit-shard ${SHARD:-(unsharded)}] running ${#files[@]} files"
-if [ -n "$MAX_CONC" ]; then
-  exec bun test --max-concurrency="$MAX_CONC" --timeout=60000 "${files[@]}"
+test_home=$(mktemp -d)
+trap 'rm -rf "$test_home"' EXIT
+# CI runs as root against a host-owned bind mount. The test HOME is isolated,
+# so seed its Git allow-list instead of inheriting the runner's global config.
+HOME="$test_home" git config --global --add safe.directory "$PWD"
+
+snapshot_files=()
+cold_files=()
+if [ -n "${GBRAIN_PGLITE_SNAPSHOT:-}" ]; then
+  for f in "${files[@]}"; do
+    cold=0
+    for opt_out in "${snapshot_opt_out[@]}"; do
+      [ "$f" = "$opt_out" ] && cold=1 && break
+    done
+    if [ "$cold" = "1" ]; then
+      cold_files+=("$f")
+    else
+      snapshot_files+=("$f")
+    fi
+  done
+else
+  snapshot_files=("${files[@]}")
 fi
-exec bun test --timeout=60000 "${files[@]}"
+
+# Tests must not inherit a developer's configured brain or provider keys.
+# Keep one fresh HOME per shard; fixture tests configure any credentials they
+# need explicitly.
+run_bun_test() {
+  env -u GBRAIN_HOME -u OPENAI_API_KEY -u DASHSCOPE_API_KEY -u ANTHROPIC_API_KEY \
+    -u GOOGLE_GENERATIVE_AI_API_KEY -u VOYAGE_API_KEY -u ZEROENTROPY_API_KEY \
+    -u JINA_API_KEY -u MISTRAL_API_KEY -u COHERE_API_KEY \
+    HOME="$test_home" bun test "$@"
+}
+
+run_cold_bun_test() {
+  env -u GBRAIN_HOME -u GBRAIN_PGLITE_SNAPSHOT -u OPENAI_API_KEY -u DASHSCOPE_API_KEY -u ANTHROPIC_API_KEY \
+    -u GOOGLE_GENERATIVE_AI_API_KEY -u VOYAGE_API_KEY -u ZEROENTROPY_API_KEY \
+    -u JINA_API_KEY -u MISTRAL_API_KEY -u COHERE_API_KEY \
+    HOME="$test_home" bun test "$@"
+}
+
+run_files() {
+  local runner="$1"
+  shift
+  [ "$#" -gt 0 ] || return 0
+  if [ -n "$MAX_CONC" ]; then
+    "$runner" --max-concurrency="$MAX_CONC" --timeout=60000 "$@"
+  else
+    "$runner" --timeout=60000 "$@"
+  fi
+}
+
+for f in "${cold_files[@]}"; do
+  run_files run_cold_bun_test "$f"
+done
+if [ -n "$FILES_PER_PROCESS" ]; then
+  # Keep PGLite/WASM heaps bounded without restoring the 44 MB snapshot once
+  # per file. Local and Docker CI both use this bounded batch lifecycle.
+  batch=()
+  for f in "${snapshot_files[@]}"; do
+    batch+=("$f")
+    if [ "${#batch[@]}" -eq "$FILES_PER_PROCESS" ]; then
+      run_files run_bun_test "${batch[@]}"
+      batch=()
+    fi
+  done
+  run_files run_bun_test "${batch[@]}"
+else
+  run_files run_bun_test "${snapshot_files[@]}"
+fi

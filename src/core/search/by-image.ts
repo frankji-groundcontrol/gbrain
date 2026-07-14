@@ -33,6 +33,7 @@ import { rrfFusionWeighted, RRF_K } from './hybrid.ts';
 import { dedupResults } from './dedup.ts';
 import { embedQueryMultimodal, embedQueryMultimodalImage } from '../ai/gateway.ts';
 import { loadSearchModeConfig, resolveSearchMode } from './mode.ts';
+import { applyReranker, isDashscopeVlReranker, makeImageCandidateResolver } from './rerank.ts';
 
 export interface SearchByImageOpts extends SearchOpts {
   /** Optional text refinement; runs hybrid intersect via weighted RRF (D13). */
@@ -74,6 +75,27 @@ export async function searchByImage(
     sourceId: opts.sourceId,
     sourceIds: opts.sourceIds,
     // Both branches use the same source-scope threading.
+  };
+
+  const applyImageReranker = async (results: SearchResult[]): Promise<SearchResult[]> => {
+    // Other registered rerankers are text-only. Calling them with an image
+    // query would only create a predictable fail-open audit event, so image
+    // reranking is intentionally enabled only for DashScope's VL model.
+    if (!resolvedMode.reranker_enabled || !isDashscopeVlReranker(resolvedMode.reranker_model)) {
+      return results;
+    }
+    return applyReranker(
+      { kind: 'image_base64', data: input.base64, mime: input.mime },
+      results,
+      {
+        enabled: true,
+        topNIn: resolvedMode.reranker_top_n_in,
+        topNOut: resolvedMode.reranker_top_n_out,
+        model: resolvedMode.reranker_model,
+        timeoutMs: resolvedMode.reranker_timeout_ms,
+      },
+      makeImageCandidateResolver(engine),
+    );
   };
 
   // Image branch — always runs.
@@ -120,9 +142,11 @@ export async function searchByImage(
       true, // apply boost
     );
     fused.sort((a, b) => b.score - a.score);
-    return dedupResults(fused).slice(offset, offset + limit);
+    const reranked = await applyImageReranker(dedupResults(fused));
+    return reranked.slice(offset, offset + limit);
   }
 
   // Image-only: return the deduped image branch directly.
-  return dedupResults(imageList).slice(offset, offset + limit);
+  const reranked = await applyImageReranker(dedupResults(imageList));
+  return reranked.slice(offset, offset + limit);
 }

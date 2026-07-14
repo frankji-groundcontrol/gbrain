@@ -32,6 +32,18 @@ describe('lookupEmbeddingPrice — first-class providers', () => {
     if (r.kind === 'known') expect(r.pricePerMTok).toBe(0.18);
   });
 
+  test('Voyage multimodal-3 at $0.18/MTok', () => {
+    const r = lookupEmbeddingPrice('voyage:voyage-multimodal-3');
+    expect(r.kind).toBe('known');
+    if (r.kind === 'known') expect(r.pricePerMTok).toBe(0.18);
+  });
+
+  test('DashScope Vision Plus at $0.07/MTok for text reindexing', () => {
+    const r = lookupEmbeddingPrice('dashscope:tongyi-embedding-vision-plus-2026-03-06');
+    expect(r.kind).toBe('known');
+    if (r.kind === 'known') expect(r.pricePerMTok).toBe(0.07);
+  });
+
   test('ZeroEntropy zembed-1 at $0.05/MTok (v0.35.1.0+)', () => {
     const r = lookupEmbeddingPrice('zeroentropyai:zembed-1');
     expect(r.kind).toBe('known');

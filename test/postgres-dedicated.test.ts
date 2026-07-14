@@ -14,7 +14,7 @@
  * writeConfig helper).
  */
 
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -32,57 +32,66 @@ const POOLER_URL =
   'postgresql://postgres.someref:pw@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres';
 
 describe('postgres_schema config precedence + validation', () => {
-  let home: string;
-  const savedHome = process.env.GBRAIN_HOME;
-
-  beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), 'gbrain-dedicated-'));
+  async function withConfig<T>(fn: (home: string) => T | Promise<T>): Promise<T> {
+    const home = mkdtempSync(join(tmpdir(), 'gbrain-dedicated-'));
     mkdirSync(join(home, '.gbrain'), { recursive: true });
-    process.env.GBRAIN_HOME = home;
-  });
+    try {
+      return await withEnv({
+        GBRAIN_HOME: home,
+        GBRAIN_POSTGRES_SCHEMA: undefined,
+        GBRAIN_DATABASE_URL: undefined,
+        GBRAIN_DIRECT_DATABASE_URL: undefined,
+        DATABASE_URL: undefined,
+      }, () => fn(home));
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
 
-  afterEach(() => {
-    if (savedHome === undefined) delete process.env.GBRAIN_HOME;
-    else process.env.GBRAIN_HOME = savedHome;
-    rmSync(home, { recursive: true, force: true });
-  });
-
-  function writeConfig(obj: Record<string, unknown>): void {
+  function writeConfig(home: string, obj: Record<string, unknown>): void {
     writeFileSync(join(home, '.gbrain', 'config.json'), JSON.stringify(obj));
   }
 
-  test('file-plane postgres_schema surfaces in loadConfig', () => {
-    writeConfig({ engine: 'postgres', database_url: POOLER_URL, postgres_schema: 'groundcontrol' });
-    expect(loadConfig()?.postgres_schema).toBe('groundcontrol');
-  });
-
-  test('GBRAIN_POSTGRES_SCHEMA overrides file value', async () => {
-    writeConfig({ engine: 'postgres', database_url: POOLER_URL, postgres_schema: 'groundcontrol' });
-    await withEnv({ GBRAIN_POSTGRES_SCHEMA: 'groundcontrol' }, () => {
+  test('file-plane postgres_schema surfaces in loadConfig', async () => {
+    await withConfig((home) => {
+      writeConfig(home, { engine: 'postgres', database_url: POOLER_URL, postgres_schema: 'groundcontrol' });
       expect(loadConfig()?.postgres_schema).toBe('groundcontrol');
-      return Promise.resolve();
     });
   });
 
-  test('toEngineConfig preserves postgres_schema', () => {
-    writeConfig({ engine: 'postgres', database_url: POOLER_URL, postgres_schema: 'groundcontrol' });
-    const cfg = loadConfig()!;
-    expect(toEngineConfig(cfg).postgres_schema).toBe('groundcontrol');
+  test('GBRAIN_POSTGRES_SCHEMA overrides file value', async () => {
+    await withConfig(async (home) => {
+      writeConfig(home, { engine: 'postgres', database_url: POOLER_URL, postgres_schema: 'groundcontrol' });
+      await withEnv({ GBRAIN_POSTGRES_SCHEMA: 'groundcontrol' }, () => {
+        expect(loadConfig()?.postgres_schema).toBe('groundcontrol');
+      });
+    });
   });
 
-  test('absent field leaves legacy config byte-compatible', () => {
-    writeConfig({ engine: 'postgres', database_url: POOLER_URL });
-    const cfg = loadConfig()!;
-    expect(cfg.postgres_schema).toBeUndefined();
-    expect(toEngineConfig(cfg).postgres_schema).toBeUndefined();
+  test('toEngineConfig preserves postgres_schema', async () => {
+    await withConfig((home) => {
+      writeConfig(home, { engine: 'postgres', database_url: POOLER_URL, postgres_schema: 'groundcontrol' });
+      expect(toEngineConfig(loadConfig()!).postgres_schema).toBe('groundcontrol');
+    });
   });
 
-  test('invalid postgres_schema values are rejected by loadConfig', () => {
-    const invalid = ['public', '', ' groundcontrol ', 'gbrain', 'GROUNDCONTROL', 'groundcontrol ', 'x'];
-    for (const v of invalid) {
-      writeConfig({ engine: 'postgres', database_url: POOLER_URL, postgres_schema: v });
-      expect(() => loadConfig(), `expected throw for postgres_schema=${JSON.stringify(v)}`).toThrow();
-    }
+  test('absent field leaves legacy config byte-compatible', async () => {
+    await withConfig((home) => {
+      writeConfig(home, { engine: 'postgres', database_url: POOLER_URL });
+      const cfg = loadConfig()!;
+      expect(cfg.postgres_schema).toBeUndefined();
+      expect(toEngineConfig(cfg).postgres_schema).toBeUndefined();
+    });
+  });
+
+  test('invalid postgres_schema values are rejected by loadConfig', async () => {
+    await withConfig((home) => {
+      const invalid = ['public', '', ' groundcontrol ', 'gbrain', 'GROUNDCONTROL', 'groundcontrol ', 'x'];
+      for (const v of invalid) {
+        writeConfig(home, { engine: 'postgres', database_url: POOLER_URL, postgres_schema: v });
+        expect(() => loadConfig(), `expected throw for postgres_schema=${JSON.stringify(v)}`).toThrow();
+      }
+    });
   });
 });
 

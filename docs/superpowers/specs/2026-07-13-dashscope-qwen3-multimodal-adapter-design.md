@@ -1,7 +1,8 @@
 # DashScope Qwen3 Multimodal Adapter Design
 
 **Date:** 2026-07-13  
-**Status:** Approved for implementation planning
+**Status:** Superseded by the Vision Plus unified plan
+**Superseded by:** `docs/plans/2026-07-13-dashscope-vision-plus-unified-multimodal.md`
 
 ## Goal
 

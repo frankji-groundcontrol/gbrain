@@ -2099,7 +2099,7 @@ export class PGLiteEngine implements BrainEngine {
     // list. Image chunks pass embedding=null + embedding_image=Float32Array
     // (1024-dim Voyage). Text/code chunks pass embedding=Float32Array +
     // embedding_image=null. Default modality='text' when omitted.
-    const cols = '(page_id, chunk_index, chunk_text, chunk_source, embedding, model, token_count, embedded_at, language, symbol_name, symbol_type, start_line, end_line, parent_symbol_path, doc_comment, symbol_name_qualified, modality, embedding_image)';
+    const cols = '(page_id, chunk_index, chunk_text, chunk_source, embedding, model, token_count, embedded_at, language, symbol_name, symbol_type, start_line, end_line, parent_symbol_path, doc_comment, symbol_name_qualified, modality, embedding_image, embedding_multimodal)';
     const rowParts: string[] = [];
     const params: unknown[] = [];
     let paramIdx = 1;
@@ -2111,6 +2111,9 @@ export class PGLiteEngine implements BrainEngine {
       const embeddingImageStr = chunk.embedding_image
         ? '[' + Array.from(chunk.embedding_image).join(',') + ']'
         : null;
+      const embeddingMultimodalStr = chunk.embedding_multimodal
+        ? '[' + Array.from(chunk.embedding_multimodal).join(',') + ']'
+        : null;
       const parentPath = chunk.parent_symbol_path && chunk.parent_symbol_path.length > 0
         ? chunk.parent_symbol_path
         : null;
@@ -2120,13 +2123,14 @@ export class PGLiteEngine implements BrainEngine {
       const embeddingPh = embeddingStr ? `$${paramIdx++}::vector` : 'NULL';
       const embeddedAtPh = embeddingStr ? 'now()' : 'NULL';
       const embeddingImagePh = embeddingImageStr ? `$${paramIdx++}::vector` : 'NULL';
+      const embeddingMultimodalPh = embeddingMultimodalStr ? `$${paramIdx++}::vector` : 'NULL';
 
       rowParts.push(
         `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, ` +
         `${embeddingPh}, $${paramIdx++}, $${paramIdx++}, ${embeddedAtPh}, ` +
         `$${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, ` +
         `$${paramIdx++}::text[], $${paramIdx++}, $${paramIdx++}, ` +
-        `$${paramIdx++}, ${embeddingImagePh})`,
+        `$${paramIdx++}, ${embeddingImagePh}, ${embeddingMultimodalPh})`,
       );
 
       // Param push order MUST match placeholder allocation order. Both
@@ -2134,6 +2138,7 @@ export class PGLiteEngine implements BrainEngine {
       // bulk row placeholders, so their values must be pushed first.
       if (embeddingStr) params.push(embeddingStr);
       if (embeddingImageStr) params.push(embeddingImageStr);
+      if (embeddingMultimodalStr) params.push(embeddingMultimodalStr);
       params.push(
         pageId, chunk.chunk_index, chunk.chunk_text, chunk.chunk_source,
         chunk.model || DEFAULT_EMBEDDING_MODEL, chunk.token_count || null,
@@ -2183,7 +2188,8 @@ export class PGLiteEngine implements BrainEngine {
          doc_comment = EXCLUDED.doc_comment,
          symbol_name_qualified = EXCLUDED.symbol_name_qualified,
          modality = EXCLUDED.modality,
-         embedding_image = COALESCE(EXCLUDED.embedding_image, content_chunks.embedding_image)`,
+         embedding_image = COALESCE(EXCLUDED.embedding_image, content_chunks.embedding_image),
+         embedding_multimodal = COALESCE(EXCLUDED.embedding_multimodal, content_chunks.embedding_multimodal)`,
       params
     );
   }

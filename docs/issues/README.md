@@ -11,6 +11,12 @@ here carries the analysis those trackers link to.
 
 ## Records
 
+- [2026-07-13-dashscope-workspace-embedding-endpoint.md](2026-07-13-dashscope-workspace-embedding-endpoint.md)
+  — workspace-native DashScope embeddings need a request/response adapter;
+  model-override probes must preserve the configured provider URL.
+- [2026-07-13-dashscope-vision-plus-multimodal.md](2026-07-13-dashscope-vision-plus-multimodal.md)
+  — resolved native Vision Plus adapter and safe 1024d unified text-and-image
+  rollout for DashScope workspaces.
 - [cross-modal-search.md](cross-modal-search.md) — text↔image cross-modal
   search proposal. Phases 1–2 have since shipped (`cross_modal` routing +
   `search_by_image`).

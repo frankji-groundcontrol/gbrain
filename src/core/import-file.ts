@@ -9,6 +9,7 @@ import { chunkCodeText, chunkCodeTextFull, detectCodeLanguage, CHUNKER_VERSION }
 import { findChunkForOffset } from './chunkers/edge-extractor.ts';
 import { extractCodeRefs, imageOfCandidates } from './link-extraction.ts';
 import { embedBatch, embedMultimodal, currentEmbeddingSignature } from './embedding.ts';
+import { getEmbeddingModel, getMultimodalModel } from './ai/gateway.ts';
 import { slugifyPath, slugifyCodePath, isCodeFilePath } from './sync.ts';
 import type { ChunkInput, PageInput, PageType } from './types.ts';
 import { computeEffectiveDate } from './effective-date.ts';
@@ -1567,7 +1568,16 @@ export async function importImageFile(
   const hash = createHash('sha256').update(buf).digest('hex');
 
   const existing = await engine.getPage(imageSlug);
-  if (existing?.content_hash === hash) {
+  const multimodalModel = opts.noEmbed
+    ? undefined
+    : (getMultimodalModel() ?? getEmbeddingModel());
+  const existingChunks = existing
+    ? await engine.getChunks(imageSlug, { sourceId: opts.sourceId })
+    : [];
+  const hasCurrentUnifiedEmbedding = !!multimodalModel && existingChunks.some(chunk =>
+    chunk.model === multimodalModel && chunk.embedding_multimodal,
+  );
+  if (existing?.content_hash === hash && (opts.noEmbed || hasCurrentUnifiedEmbedding)) {
     return { slug: imageSlug, status: 'skipped', chunks: 0 };
   }
 
@@ -1623,12 +1633,16 @@ export async function importImageFile(
   // Single chunk per image. chunk_text holds OCR text or filename so
   // searchKeyword has something useful to match when image rows are opted in.
   // chunk_source='image_asset' joins the v0.20 chunk_source allowlist.
-  const chunk: ChunkInput & { modality?: string; embedding_image?: Float32Array } = {
+  const chunk: ChunkInput = {
     chunk_index: 0,
     chunk_text: ocrText || filename,
     chunk_source: 'image_asset',
     modality: 'image',
-    ...(embedding ? { embedding_image: embedding } : {}),
+    ...(embedding ? {
+      embedding_image: embedding,
+      embedding_multimodal: embedding,
+      model: multimodalModel,
+    } : {}),
   };
 
   const fileSpec: FileSpec = {

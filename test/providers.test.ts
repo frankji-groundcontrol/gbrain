@@ -6,9 +6,8 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { formatRecipeTable, envReady } from '../src/commands/providers.ts';
+import { buildProbeGatewayConfig, formatRecipeTable, envReady } from '../src/commands/providers.ts';
 import { listRecipes, getRecipe } from '../src/core/ai/recipes/index.ts';
-import type { Recipe } from '../src/core/ai/types.ts';
 
 describe('envReady', () => {
   test('true when all required env vars set', () => {
@@ -28,7 +27,6 @@ describe('envReady', () => {
   });
 
   test('true for recipes with no required env (local Ollama)', () => {
-    // Ollama has no auth_env.required.
     const ollama = getRecipe('ollama');
     expect(ollama).toBeDefined();
     expect(envReady(ollama!, {})).toBe(true);
@@ -48,7 +46,6 @@ describe('formatRecipeTable', () => {
 
   test('shows ✓ ready for env-satisfied provider', () => {
     const out = formatRecipeTable(listRecipes(), { OPENAI_API_KEY: 'sk-test' });
-    // openai row should be ready
     const openaiLine = out.split('\n').find(line => line.startsWith('openai'));
     expect(openaiLine).toBeDefined();
     expect(openaiLine).toContain('✓ ready');
@@ -56,7 +53,6 @@ describe('formatRecipeTable', () => {
 
   test('shows ✗ missing <ENV> for missing provider', () => {
     const out = formatRecipeTable(listRecipes(), {});
-    // openai should show missing OPENAI_API_KEY
     const openaiLine = out.split('\n').find(line => line.startsWith('openai'));
     expect(openaiLine).toBeDefined();
     expect(openaiLine).toContain('✗ missing OPENAI_API_KEY');
@@ -64,8 +60,7 @@ describe('formatRecipeTable', () => {
 
   test('each recipe appears at most once', () => {
     const out = formatRecipeTable(listRecipes(), {});
-    const recipes = listRecipes();
-    for (const r of recipes) {
+    for (const r of listRecipes()) {
       const occurrences = out.split('\n').filter(line => line.startsWith(`${r.id} `) || line.startsWith(`${r.id}  `));
       expect(occurrences.length).toBeGreaterThanOrEqual(1);
     }
@@ -75,7 +70,6 @@ describe('formatRecipeTable', () => {
     const out = formatRecipeTable(listRecipes(), {});
     const zeLine = out.split('\n').find(line => line.startsWith('zeroentropyai'));
     expect(zeLine).toBeDefined();
-    // ZE has embedding but no expansion or chat
     expect(zeLine).toContain('yes');
     expect(zeLine).toContain('—');
   });
@@ -86,11 +80,25 @@ describe('formatRecipeTable', () => {
     expect(openai && ze).toBeTruthy();
     const out = formatRecipeTable([openai!, ze!], { OPENAI_API_KEY: 'sk-test' });
     const lines = out.split('\n');
-    // header + separator + 2 recipe rows
     expect(lines.length).toBe(4);
     expect(lines[2]).toContain('openai');
     expect(lines[2]).toContain('✓ ready');
     expect(lines[3]).toContain('zeroentropyai');
     expect(lines[3]).toContain('✗ missing ZEROENTROPY_API_KEY');
+  });
+});
+
+describe('provider probes', () => {
+  test('preserve a configured provider base URL when overriding the embedding model', () => {
+    expect(buildProbeGatewayConfig(
+      { provider_base_urls: { dashscope: 'https://workspace.example/api/v1/services/embeddings/text-embedding/text-embedding' } } as any,
+      'embedding',
+      'dashscope:text-embedding-v4',
+      1024,
+    )).toMatchObject({
+      embedding_model: 'dashscope:text-embedding-v4',
+      embedding_dimensions: 1024,
+      base_urls: { dashscope: 'https://workspace.example/api/v1/services/embeddings/text-embedding/text-embedding' },
+    });
   });
 });

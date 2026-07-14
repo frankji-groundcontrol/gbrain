@@ -141,7 +141,9 @@ describe('Reranker invocation receives query + documents', () => {
       topNIn: 3,
       topNOut: null,
       rerankerFn: async (input) => {
-        received = { query: input.query, documents: input.documents };
+        // This text-only call path keeps the compatibility shape even though
+        // the gateway's DashScope adapter also supports rich content.
+        received = { query: input.query as string, documents: input.documents as string[] };
         return [
           { index: 0, relevanceScore: 0.9 },
           { index: 1, relevanceScore: 0.5 },

@@ -103,19 +103,7 @@ describeE2E('embed --stale cursor pagination (D7 + REGRESSION)', () => {
     // via raw SQL on demand.
   });
 
-  afterAll(async () => {
-    // setupDB's ALL_TABLES truncate list does NOT include `sources`
-    // (the `default` row is treated as fixed). This test adds an
-    // `other-source` row for the D7 cases; clean it up so later tests
-    // running on the same DB don't see a never-synced source (which
-    // mechanical.test.ts:`gbrain doctor` would correctly fail on).
-    try {
-      await getConn()`DELETE FROM sources WHERE id <> 'default'`;
-    } catch {
-      // If the connection is already torn down, that's fine.
-    }
-    await teardownDB();
-  });
+  afterAll(async () => { await teardownDB(); });
 
   test('migration v66 created partial index idx_chunks_embedding_null', async () => {
     const exists = await indexExists('idx_chunks_embedding_null');

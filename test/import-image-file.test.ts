@@ -5,16 +5,18 @@
 // Real-API embedding is exercised in test/e2e/voyage-multimodal.test.ts (gated
 // VOYAGE_API_KEY) and the dual-engine parity gate lands in Phase 10.
 
-import { describe, expect, test, beforeAll, afterAll, beforeEach } from 'bun:test';
+import { describe, expect, test, beforeAll, afterAll, beforeEach, afterEach } from 'bun:test';
 import { mkdtempSync, writeFileSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { importImageFile, isImageFilePath, pLimit, SUPPORTED_IMAGE_EXTS } from '../src/core/import-file.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
+import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
 
 let engine: PGLiteEngine;
 let tmpDir: string;
+const realFetch = globalThis.fetch;
 
 beforeAll(async () => {
   engine = new PGLiteEngine();
@@ -29,6 +31,11 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await resetPgliteState(engine);
+});
+
+afterEach(() => {
+  globalThis.fetch = realFetch;
+  resetGateway();
 });
 
 describe('isImageFilePath / SUPPORTED_IMAGE_EXTS', () => {
@@ -127,5 +134,55 @@ describe('importImageFile happy path (noEmbed)', () => {
     const result = await importImageFile(engine, target, 'photos/huge.png', { noEmbed: true });
     expect(result.status).toBe('skipped');
     expect(result.error).toMatch(/Image too large/);
+  });
+});
+
+describe('importImageFile unified multimodal image embeddings', () => {
+  test('writes one Vision Plus image vector into both image columns and backfills an unchanged image missing the unified vector', async () => {
+    let embedCalls = 0;
+    globalThis.fetch = (async () => {
+      embedCalls++;
+      return new Response(JSON.stringify({
+        output: { embeddings: [{ index: 0, embedding: Array.from({ length: 1024 }, () => 0.25) }] },
+      }), { headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof fetch;
+    configureGateway({
+      embedding_model: 'dashscope:text-embedding-v4',
+      embedding_dimensions: 1024,
+      embedding_multimodal_model: 'dashscope:tongyi-embedding-vision-plus-2026-03-06',
+      base_urls: {
+        dashscope: 'https://llm-example.cn-beijing.maas.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding',
+      },
+      env: { DASHSCOPE_API_KEY: 'test-key' },
+    });
+
+    const target = join(tmpDir, 'vision-plus.png');
+    writeFileSync(target, Buffer.from('vision-plus-image'));
+    const slug = 'photos/vision-plus.png';
+
+    expect(await importImageFile(engine, target, slug)).toMatchObject({ status: 'imported', chunks: 1 });
+    expect(embedCalls).toBe(1);
+    const stored = await engine.executeRaw<{ image: boolean; unified: boolean; model: string }>(
+      `SELECT embedding_image IS NOT NULL AS image,
+              embedding_multimodal IS NOT NULL AS unified,
+              model
+       FROM content_chunks cc JOIN pages p ON p.id = cc.page_id
+       WHERE p.slug = 'photos/vision-plus.png' AND p.source_id = 'default'`,
+    );
+    expect(stored).toEqual([{
+      image: true,
+      unified: true,
+      model: 'dashscope:tongyi-embedding-vision-plus-2026-03-06',
+    }]);
+
+    await engine.executeRaw(
+      `UPDATE content_chunks SET embedding_multimodal = NULL
+       WHERE page_id = (SELECT id FROM pages WHERE slug = 'photos/vision-plus.png' AND source_id = 'default')`,
+    );
+    expect(await importImageFile(engine, target, slug)).toMatchObject({ status: 'imported', chunks: 1 });
+    expect(embedCalls).toBe(2);
+
+    expect(await importImageFile(engine, target, slug)).toMatchObject({ status: 'skipped', chunks: 0 });
+    expect(embedCalls).toBe(2);
   });
 });

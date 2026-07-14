@@ -1183,9 +1183,7 @@ Do not also run `ci:local:diff`; the full gate is the stronger non-redundant res
 ```bash
 git diff --check > /tmp/ded-final-dc.txt 2>&1; rc=$?; printf 'EXIT=%s\n' "$rc"; exit "$rc"
 cat /tmp/ded-final-dc.txt
-git diff --unified=0 -- src test docs > /tmp/ded-final-added.diff
-rg --pcre2 '^\+(?!\+\+).*Wintermute' /tmp/ded-final-added.diff > /tmp/ded-final-private.txt 2>&1; rc=$?
-if [ "$rc" -eq 1 ]; then printf 'EXIT=0 (no added private name)\n'; else cat /tmp/ded-final-private.txt; exit "$rc"; fi
+scripts/check-privacy.sh > /tmp/ded-final-private.txt 2>&1; rc=$?; printf 'EXIT=%s\n' "$rc"; exit "$rc"
 ```
 
 - [ ] **Step 8: Verify only intentional files changed**

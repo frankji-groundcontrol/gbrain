@@ -44,13 +44,27 @@ Three regexes, zero LLM tokens, single SQL `addLinksBatch` call with `INSERT ...
 
 Heuristic link-type inference (`attended`, `works_at`, `invested_in`, `founded`, `advises`) fires from surrounding sentence context — also LLM-free. Power users who want richer types add them via the typed-link blockquote convention.
 
-## ZeroEntropy as reranker: 60% top-1 reshuffle
+## Cross-encoder reranking
 
-v0.36.0.0 ships ZeroEntropy's `zerank-2` as the default reranker (on for the `balanced` mode bundle). On a real-corpus benchmark across 20 queries, zerank-2 reshuffles **60% of top-1 results** after the hybrid + RRF + graph stack. That's the headline number.
+The configured reranker re-scores the head of the retrieved candidate list
+after hybrid + RRF + graph signals. A text-only provider such as ZeroEntropy's
+`zerank-2` receives query text plus text chunks. DashScope's
+`qwen3-vl-rerank` can additionally receive an image query or a bounded mix of
+text and image candidates.
 
 The mechanical reason: hybrid ranking is locally optimal per strategy but globally suboptimal. A cross-encoder reranker reads the query + each candidate document jointly, with full attention. It catches the cases where the vector + keyword + graph signals all agreed on a document that's semantically related but topically wrong.
 
-The cost: +150ms p50 latency, ~$0.025/M tokens. Disabled with `gbrain config set search.reranker.enabled false`. For agent loops that do downstream LLM work after retrieval, the latency is invisible.
+Reranking is optional: disable it with `gbrain config set
+search.reranker.enabled false`. Provider latency and billing apply only after
+initial retrieval identifies candidates.
+
+For DashScope multimodal reranking, GBrain reads at most four 1 MiB image
+assets sequentially. An asset must be associated with the selected result's
+source and remain inside that source's realpath-resolved `local_path`; every
+missing, unsafe, unsupported, or over-cap asset remains a text candidate.
+This preserves source isolation and bounds disk, CPU, network, and provider
+work. The reranker remains fail-open: a candidate-resolution or provider error
+returns the initial retrieval order.
 
 ## Source-aware ranking
 
@@ -131,7 +145,7 @@ hybrid search:
 graph augment (typed-edge traversal from any seed)
        │
        ▼
-reranker (zerank-2 cross-encoder, top 30 → reordered)
+reranker (configured cross-encoder, top-N head → reordered)
        │
        ▼
 token-budget enforcement (per mode bundle)

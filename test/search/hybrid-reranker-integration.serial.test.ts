@@ -115,7 +115,7 @@ describe('hybridSearch — reranker enabled (reorder)', () => {
         topNIn: 30,
         topNOut: null,
         rerankerFn: async (input: RerankInput): Promise<RerankResult[]> => {
-          receivedDocs = input.documents;
+          receivedDocs = input.documents as string[];
           return input.documents.map((_, i) => ({ index: i, relevanceScore: 1 - i * 0.1 }));
         },
       },

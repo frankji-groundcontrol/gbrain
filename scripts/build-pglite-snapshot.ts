@@ -16,13 +16,16 @@
 // Run: bun run scripts/build-pglite-snapshot.ts
 //      (or: bun run build:pglite-snapshot)
 //
-// Re-run whenever you touch src/core/migrate.ts or src/schema.sql.
+// This is a test fixture, so its embedding width matches bunfig.toml's legacy
+// test preload (OpenAI 1536d), not production's 1280d default. Re-run whenever
+// you touch src/core/migrate.ts or src/schema.sql.
 
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import * as crypto from "node:crypto";
 
 import { PGLiteEngine, computeSnapshotSchemaHash } from "../src/core/pglite-engine.ts";
+import { configureGateway } from "../src/core/ai/gateway.ts";
 import { MIGRATIONS } from "../src/core/migrate.ts";
 import { PGLITE_SCHEMA_SQL } from "../src/core/pglite-schema.ts";
 
@@ -37,11 +40,20 @@ async function main() {
 
   const schemaHash = computeSchemaHash();
   console.log(`[build-pglite-snapshot] schema hash: ${schemaHash.slice(0, 16)}...`);
-  console.log(`[build-pglite-snapshot] booting PGLite (in-memory)...`);
-  const engine = new PGLiteEngine();
-
   // Bypass the env-aware short-circuit: we WANT a real init here.
   delete process.env.GBRAIN_PGLITE_SNAPSHOT;
+
+  // bunfig.toml preloads this configuration for every test process. Keep the
+  // dumped schema compatible so restoring it never triggers a 1280/1536
+  // vector-column mismatch and an expensive cold rebuild.
+  configureGateway({
+    embedding_model: 'openai:text-embedding-3-large',
+    embedding_dimensions: 1536,
+    env: { OPENAI_API_KEY: 'sk-test-pglite-snapshot' },
+  });
+
+  console.log(`[build-pglite-snapshot] booting PGLite (in-memory)...`);
+  const engine = new PGLiteEngine();
 
   await engine.connect({});
   console.log(`[build-pglite-snapshot] running initSchema (forward bootstrap + ${MIGRATIONS.length} migrations)...`);

@@ -3,6 +3,7 @@ import { LATEST_VERSION, runMigrations, MIGRATIONS, getIdleBlockers, hasPendingM
 import type { IdleBlocker } from '../src/core/migrate.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { withEnv } from './helpers/with-env.ts';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
@@ -50,16 +51,18 @@ describe('hasPendingMigrations', () => {
   }, 30000);
 
   test('returns true when version config is missing entirely (defensive default)', async () => {
-    const engine = new PGLiteEngine();
-    await engine.connect({});
-    try {
-      // Don't call initSchema. Probe against an empty PGlite — getConfig should
-      // either return null (treated as version=1) or throw on missing config
-      // table; either way the probe must say "yes pending."
-      expect(await hasPendingMigrations(engine)).toBe(true);
-    } finally {
-      await engine.disconnect();
-    }
+    await withEnv({ GBRAIN_PGLITE_SNAPSHOT: undefined }, async () => {
+      const engine = new PGLiteEngine();
+      await engine.connect({});
+      try {
+        // Don't call initSchema. Probe against an empty PGlite — getConfig should
+        // either return null (treated as version=1) or throw on missing config
+        // table; either way the probe must say "yes pending."
+        expect(await hasPendingMigrations(engine)).toBe(true);
+      } finally {
+        await engine.disconnect();
+      }
+    });
   }, 30000);
 });
 

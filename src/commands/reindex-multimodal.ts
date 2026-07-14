@@ -29,7 +29,8 @@ import type { BrainEngine } from '../core/engine.ts';
 import { tryAcquireDbLock } from '../core/db-lock.ts';
 import type { DbLockHandle } from '../core/db-lock.ts';
 import { sqlQueryForEngine } from '../core/sql-query.ts';
-import { embedMultimodalSafe } from '../core/ai/gateway.ts';
+import { embedMultimodalSafe, getMultimodalModel } from '../core/ai/gateway.ts';
+import { estimateCostFromChars, lookupEmbeddingPrice } from '../core/embedding-pricing.ts';
 import { createProgress } from '../core/progress.ts';
 import { getCliOptions, cliOptsToProgressOptions } from '../core/cli-options.ts';
 import { gbrainPath } from '../core/config.ts';
@@ -67,7 +68,7 @@ export interface ReindexMultimodalResult {
   reembedded: number;
   failed: number;
   dry_run: boolean;
-  cost_usd_estimate: number;
+  cost_usd_estimate: number | null;
   unified_flag_prompted: boolean;
 }
 
@@ -118,8 +119,9 @@ export async function runReindexMultimodal(
   `;
   const pendingBefore = parseInt(String(pendingRows[0]?.count ?? '0'), 10);
 
-  // Cost estimate (Voyage multimodal-3 is $0.18 / 1M tokens; ~3.5 chars/token).
-  // We estimate based on chunk_text length per row. Cheap two-stat probe.
+  // Text-only unified reindex: estimate its input at the configured
+  // multimodal model's verified token price. Image ingest runs separately and
+  // cannot be inferred from chunk_text length.
   const statsRows = pendingBefore > 0
     ? await sql`
       SELECT COALESCE(SUM(LENGTH(chunk_text)), 0)::text AS chars
@@ -128,8 +130,12 @@ export async function runReindexMultimodal(
     `
     : [{ chars: '0' }];
   const totalChars = parseInt(String(statsRows[0]?.chars ?? '0'), 10);
-  const estimatedTokens = totalChars / 3.5;
-  const costUsdEstimate = (estimatedTokens / 1_000_000) * 0.18;
+  const multimodalModel = getMultimodalModel() ?? 'voyage:voyage-multimodal-3';
+  const price = lookupEmbeddingPrice(multimodalModel);
+  const costUsdEstimate = price.kind === 'known'
+    ? estimateCostFromChars(totalChars, price.pricePerMTok)
+    : null;
+  const formattedCost = costUsdEstimate === null ? 'unavailable' : `$${costUsdEstimate.toFixed(2)}`;
 
   if (opts.costEstimate) {
     progress.finish();
@@ -174,7 +180,7 @@ export async function runReindexMultimodal(
   if (process.env.GBRAIN_NO_REEMBED === '1') {
     process.stderr.write(
       `[reindex-multimodal] skipping: GBRAIN_NO_REEMBED=1. ` +
-      `Pending: ${pendingBefore} chunks (~$${costUsdEstimate.toFixed(2)}).\n`,
+      `Pending: ${pendingBefore} chunks (est. cost: ${formattedCost}).\n`,
     );
     progress.finish();
     return {
@@ -193,8 +199,8 @@ export async function runReindexMultimodal(
   if (!opts.yes && process.stdout.isTTY && process.stdin.isTTY) {
     const minutes = Math.ceil((pendingBefore / BATCH_SIZE) * 0.5 / 60); // ~0.5s per batch
     process.stderr.write(
-      `Will re-embed ~${pendingBefore} chunks via voyage:voyage-multimodal-3, ` +
-      `est. ~$${costUsdEstimate.toFixed(2)}, ~${minutes}min. ` +
+      `Will re-embed ~${pendingBefore} chunks via ${multimodalModel}, ` +
+      `est. ${formattedCost}, ~${minutes}min. ` +
       `Press Ctrl-C within 10s to abort.\n`,
     );
     await new Promise<void>((resolve) => setTimeout(resolve, 10_000));

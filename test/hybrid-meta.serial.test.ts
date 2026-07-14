@@ -17,11 +17,20 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { hybridSearch } from '../src/core/search/hybrid.ts';
 import type { PageInput, HybridSearchMeta } from '../src/core/types.ts';
+import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
+import { emptyHome, withEnv } from './helpers/with-env.ts';
 
 let engine: PGLiteEngine;
-const savedKey = process.env.OPENAI_API_KEY;
 
 beforeAll(async () => {
+  // The test preload snapshots the developer's environment into the global
+  // gateway. Configure this suite explicitly so keyless search stays
+  // keyless even on a machine with real provider credentials.
+  configureGateway({
+    embedding_model: 'openai:text-embedding-3-large',
+    embedding_dimensions: 1536,
+    env: {},
+  });
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
@@ -34,28 +43,35 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (savedKey === undefined) delete process.env.OPENAI_API_KEY;
-  else process.env.OPENAI_API_KEY = savedKey;
   await engine.disconnect();
+  resetGateway();
 });
 
+function withoutEmbeddingProvider<T>(fn: () => T | Promise<T>): Promise<T> {
+  return withEnv({
+    GBRAIN_HOME: emptyHome(),
+    OPENAI_API_KEY: undefined,
+    DASHSCOPE_API_KEY: undefined,
+  }, fn);
+}
+
 async function runWithMeta(query: string, opts: Parameters<typeof hybridSearch>[2] = {}): Promise<HybridSearchMeta | null> {
-  let captured: HybridSearchMeta | null = null;
-  await hybridSearch(engine, query, { ...opts, onMeta: (m) => { captured = m; } });
-  return captured;
+  return withoutEmbeddingProvider(async () => {
+    let captured: HybridSearchMeta | null = null;
+    await hybridSearch(engine, query, { ...opts, onMeta: (m) => { captured = m; } });
+    return captured;
+  });
 }
 
 describe('hybridSearch return shape (v0.25.0 keeps SearchResult[])', () => {
-  test('returns SearchResult[] (unchanged from Cathedral II contract)', async () => {
-    delete process.env.OPENAI_API_KEY;
-    const out = await hybridSearch(engine, 'alice');
+  test.serial('returns SearchResult[] (unchanged from Cathedral II contract)', async () => {
+    const out = await withoutEmbeddingProvider(() => hybridSearch(engine, 'alice'));
     expect(Array.isArray(out)).toBe(true);
   });
 });
 
 describe('hybridSearch onMeta callback — vector_enabled', () => {
-  test('false when OPENAI_API_KEY is missing (keyword-only path)', async () => {
-    delete process.env.OPENAI_API_KEY;
+  test.serial('false when OPENAI_API_KEY is missing (keyword-only path)', async () => {
     const meta = await runWithMeta('alice');
     expect(meta).not.toBeNull();
     expect(meta!.vector_enabled).toBe(false);
@@ -63,28 +79,24 @@ describe('hybridSearch onMeta callback — vector_enabled', () => {
 });
 
 describe('hybridSearch onMeta callback — detail_resolved', () => {
-  test('passes through explicit detail override (caller specified "high")', async () => {
-    delete process.env.OPENAI_API_KEY;
+  test.serial('passes through explicit detail override (caller specified "high")', async () => {
     const meta = await runWithMeta('alice', { detail: 'high' });
     expect(meta!.detail_resolved).toBe('high');
   });
 
-  test('detail_resolved reflects autoDetect output when caller omits detail', async () => {
-    delete process.env.OPENAI_API_KEY;
+  test.serial('detail_resolved reflects autoDetect output when caller omits detail', async () => {
     const meta = await runWithMeta('alice');
     expect([null, 'low', 'medium', 'high']).toContain(meta!.detail_resolved);
   });
 });
 
 describe('hybridSearch onMeta callback — expansion_applied', () => {
-  test('false when expansion flag is off', async () => {
-    delete process.env.OPENAI_API_KEY;
+  test.serial('false when expansion flag is off', async () => {
     const meta = await runWithMeta('alice', { expansion: false });
     expect(meta!.expansion_applied).toBe(false);
   });
 
-  test('false when OPENAI_API_KEY missing (early-return short-circuits expansion)', async () => {
-    delete process.env.OPENAI_API_KEY;
+  test.serial('false when OPENAI_API_KEY missing (early-return short-circuits expansion)', async () => {
     const meta = await runWithMeta('alice', {
       expansion: true,
       expandFn: async () => ['alice', 'alice example', 'the person alice'],
@@ -94,9 +106,8 @@ describe('hybridSearch onMeta callback — expansion_applied', () => {
 });
 
 describe('onMeta callback omitted', () => {
-  test('hybridSearch works without onMeta (existing Cathedral II callers unaffected)', async () => {
-    delete process.env.OPENAI_API_KEY;
-    const out = await hybridSearch(engine, 'alice');
+  test.serial('hybridSearch works without onMeta (existing Cathedral II callers unaffected)', async () => {
+    const out = await withoutEmbeddingProvider(() => hybridSearch(engine, 'alice'));
     expect(Array.isArray(out)).toBe(true);
   });
 });

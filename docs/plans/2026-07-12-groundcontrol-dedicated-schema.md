@@ -1,7 +1,7 @@
 ---
 title: "feat: dedicated groundcontrol Postgres schema mode"
 type: feature
-status: in-progress
+status: completed
 date: 2026-07-12
 ---
 
@@ -28,16 +28,16 @@ Task 0 is the docs-record scaffolding (this file).
 ## Checklist
 
 - [x] Plan record opened (this file) + indexed in `docs/plans/README.md`
-- [ ] Task 1: fixed config + URL normalization (`src/core/postgres-dedicated.ts`)
-- [ ] Task 2: preserve resolved `EngineConfig` across host/worker/reconnect
-- [ ] Task 3: preflight every distinct pool before DDL
-- [ ] Task 4: dedicated bootstrap rendering + trigram qualification
-- [ ] Task 5A: select dedicated migration variants (no history rewrite)
-- [ ] Task 5B: namespace-scope catalog probes + retrieval planner
-- [ ] Task 6: verify before version advancement (compatibility-classified)
-- [ ] Task 7: gate init/migrate-engine persistence on full dedicated verification
-- [ ] Task 8: real-Postgres lifecycle E2E + selective CI wiring
-- [ ] Task 9: operator/runtime docs + final gates
+- [x] Task 1: fixed config + URL normalization (`src/core/postgres-dedicated.ts`)
+- [x] Task 2: preserve resolved `EngineConfig` across host/worker/reconnect
+- [x] Task 3: preflight every distinct pool before DDL
+- [x] Task 4: dedicated bootstrap rendering + trigram qualification
+- [x] Task 5A: select dedicated migration variants (no history rewrite)
+- [x] Task 5B: namespace-scope catalog probes + retrieval planner
+- [x] Task 6: verify before version advancement (compatibility-classified)
+- [x] Task 7: gate init/migrate-engine persistence on full dedicated verification
+- [x] Task 8: real-Postgres lifecycle E2E + selective CI wiring
+- [x] Task 9: operator/runtime docs + final gates
 
 ## Deferrals
 

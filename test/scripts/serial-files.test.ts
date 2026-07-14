@@ -61,6 +61,17 @@ describe('run-serial-tests.sh contract', () => {
     expect(src).toMatch(/bun test\s+--max-concurrency=1/);
   });
 
+  it('gives every serial process an empty GBRAIN_HOME', () => {
+    const src = readFileSync(SERIAL_SH, 'utf-8');
+    expect(src).toMatch(/gbrain_home=\$\(mktemp -d\)/);
+    expect(src).toMatch(/GBRAIN_HOME="\$gbrain_home" bun test/);
+  });
+
+  it('does not inherit embedding-provider credentials', () => {
+    const src = readFileSync(SERIAL_SH, 'utf-8');
+    expect(src).toMatch(/env -u OPENAI_API_KEY -u DASHSCOPE_API_KEY/);
+  });
+
   it('disjoint from run-unit-shard.sh (a file is never in both passes)', () => {
     const serialFiles = new Set(dryRunList(SERIAL_SH));
     const unitFiles = new Set(dryRunList(SHARD_SH));

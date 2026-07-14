@@ -41,10 +41,15 @@ echo "[serial-tests] running ${#files[@]} file(s), one bun process per file"
 fail_count=0
 failed_files=()
 for f in "${files[@]}"; do
-  if ! bun test --max-concurrency=1 --timeout=60000 "$f"; then
+  gbrain_home=$(mktemp -d)
+  if ! env -u OPENAI_API_KEY -u DASHSCOPE_API_KEY -u ANTHROPIC_API_KEY \
+    -u GOOGLE_GENERATIVE_AI_API_KEY -u VOYAGE_API_KEY -u ZEROENTROPY_API_KEY \
+    -u JINA_API_KEY -u MISTRAL_API_KEY -u COHERE_API_KEY \
+    GBRAIN_HOME="$gbrain_home" bun test --max-concurrency=1 --timeout=60000 "$f"; then
     fail_count=$((fail_count + 1))
     failed_files+=("$f")
   fi
+  rm -rf "$gbrain_home"
 done
 
 if [ "$fail_count" -gt 0 ]; then
