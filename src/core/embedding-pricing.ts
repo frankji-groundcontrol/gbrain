@@ -45,6 +45,16 @@ export const EMBEDDING_PRICING: Record<string, EmbeddingPricing> = {
   // Vision Plus: ¥0.0005/1K input tokens ≈ $0.07/1M at 7.1 CNY/USD,
   // https://help.aliyun.com/zh/model-studio/embedding (verified 2026-07-13).
   'dashscope:tongyi-embedding-vision-plus-2026-03-06': { pricePerMTok: 0.07 },
+  // ZeroEntropy reranker (docs/ai-providers/zeroentropy.md — $0.025/1M tokens).
+  // Reused here (not a separate rerank table) because budget-tracker.ts's
+  // rerank-kind lookup falls back to this same table for paid providers.
+  'zeroentropyai:zerank-2':        { pricePerMTok: 0.025 },
+  // Mistral (https://mistral.ai/pricing/api/, verified 2026-07-19)
+  'mistral:mistral-embed':         { pricePerMTok: 0.10 },
+  'mistral:mistral-embed-2312':    { pricePerMTok: 0.10 },
+  // Perplexity (https://docs.perplexity.ai/getting-started/pricing, verified 2026-07-21)
+  'perplexity:pplx-embed-v1-0.6b': { pricePerMTok: 0.004 },
+  'perplexity:pplx-embed-v1-4b':   { pricePerMTok: 0.03 },
 };
 
 export type PriceLookupResult =

@@ -22,7 +22,8 @@ export type Implementation =
   | 'native-openai'
   | 'native-google'
   | 'native-anthropic'
-  | 'openai-compatible';
+  | 'openai-compatible'
+  | 'claude-cli';
 
 export interface EmbeddingTouchpoint {
   models: string[];
@@ -55,13 +56,15 @@ export interface EmbeddingTouchpoint {
    */
   safety_factor?: number;
   /**
-   * Maximum number of input texts per embeddings request. Some providers
-   * cap request size by item count independent of tokens (DashScope
-   * text-embedding-v4: 10 texts/request). When set, the gateway further
-   * splits each token-budgeted batch into runs of at most this many texts,
-   * so small-chunk batches don't trip the provider's count limit and burn
-   * recursive-halving retries. Only consulted when `max_batch_tokens` is
-   * also set.
+   * Maximum number of inputs per embedding request. Some providers enforce a
+   * hard COUNT cap independent of token budget — DashScope text-embedding-v4
+   * (10 texts/request), and llama.cpp's `llama-server`, which rejects requests
+   * with more inputs than its launch batch size (e.g. `batch size 100 >
+   * maximum allowed batch size 32`). The token-budget pre-split cannot bound
+   * item count (many tiny chunks fit under any token budget), so this is
+   * enforced as a separate hard re-split after the token split. Without it,
+   * small-chunk batches trip the provider's count limit and burn recursive-
+   * halving retries. When unset, no count cap is applied.
    */
   max_batch_items?: number;
   /**
@@ -232,8 +235,13 @@ export interface ChatTouchpoint {
    * Strictly stronger than supports_tools.
    */
   supports_subagent_loop: boolean;
-  /** Anthropic-style ephemeral prompt cache markers honored. */
-  supports_prompt_cache?: boolean;
+  /**
+   * Prompt caching honored for this chat touchpoint. Static booleans cover
+   * native providers; openai-compatible aggregators may decide per model id
+   * (e.g. OpenRouter caches OpenAI and Anthropic routes but not every routed
+   * model family).
+   */
+  supports_prompt_cache?: boolean | ((modelId: string) => boolean);
   max_context_tokens?: number;
   cost_per_1m_input_usd?: number;
   cost_per_1m_output_usd?: number;
@@ -337,6 +345,18 @@ export interface Recipe {
     fetch?: typeof fetch;
   };
   /**
+   * Optional inbound-response rewriter for openai-compatible recipes whose wire
+   * shape needs normalizing before the AI SDK adapter parses it. `fetch` wraps
+   * the transport and MUST be fail-open (return the original response on any
+   * error). Used by DeepSeek to promote `reasoning_content` into `content` when
+   * the reasoner returns an empty `content` (the adapter reads only `content`).
+   * Applied by `applyOpenAICompatConfig`; a `resolveOpenAICompatConfig`-provided
+   * fetch takes precedence when both are present.
+   */
+  compat?: {
+    fetch?: typeof fetch;
+  };
+  /**
    * v0.32 (D13=A): optional runtime readiness check for local-server
    * recipes (ollama, llama-server, future lmstudio-recipe). Returns
    * `ready: false` when the local endpoint isn't reachable, with a `hint`
@@ -387,6 +407,8 @@ export interface AIGatewayConfig {
   chat_fallback_chain?: string[];
   /** Optional per-provider base URL override (openai-compatible variants). */
   base_urls?: Record<string, string>;
+  /** Optional chat providerOptions overrides keyed by recipe id or "recipe:modelId". */
+  provider_chat_options?: Record<string, Record<string, unknown>>;
   /** Env snapshot read once at configuration time. Gateway never reads process.env at call time. */
   env: Record<string, string | undefined>;
 }

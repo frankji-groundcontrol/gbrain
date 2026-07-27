@@ -18,3 +18,8 @@ Use these records to understand prior choices before resolving the same area aga
   — reconciled fork-specific embedding-provider documentation with upstream
   provider-agnostic gateway changes and restored the search-mode dashboard's
   query-embedding timeout entry.
+- [2026-07-27 upstream master into franky](2026-07-27-upstream-master-into-franky/README.md)
+  — 16-file sync to upstream 0.42.66.0. Preserved both fork themes (DashScope
+  providers, dedicated `groundcontrol` schema) against upstream's source-isolation
+  threading and migration-engine rewrite. Records why `public.`-qualified trigram
+  calls and `search_path FROM CURRENT` are load-bearing under dedicated mode.
